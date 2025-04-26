@@ -11,6 +11,7 @@ use serde_json::Value;
 use chrono::{DateTime, Utc};
 use url::Url;
 pub mod client;
+pub mod webfinger;
 
 /// Represents types of objects in ActivityPub.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
