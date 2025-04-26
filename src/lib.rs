@@ -1,14 +1,14 @@
 //! ActivityPub protocol implementation based on W3C specification.
-//! 
+//!
 //! This crate provides types and deserialization for ActivityPub protocol,
 //! which is a decentralized social networking protocol based on ActivityStreams 2.0.
-//! 
+//!
 //! See the [W3C ActivityPub Specification](https://www.w3.org/TR/activitypub/) for details.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize, Deserializer};
-use serde_json::Value;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
 use url::Url;
 pub mod client;
 pub mod httpsignature;
@@ -26,14 +26,14 @@ pub enum ObjectType {
     OrderedCollection,
     CollectionPage,
     OrderedCollectionPage,
-    
+
     // Actor types
     Application,
     Group,
     Organization,
     Person,
     Service,
-    
+
     // Object types
     Article,
     Audio,
@@ -47,7 +47,7 @@ pub enum ObjectType {
     Relationship,
     Tombstone,
     Video,
-    
+
     // Other types that may be defined by extensions
     #[serde(other)]
     Other,
@@ -85,7 +85,7 @@ pub enum ActivityType {
     Undo,
     Update,
     View,
-    
+
     // Other activities that may be defined by extensions
     #[serde(other)]
     Other,
@@ -97,39 +97,39 @@ pub struct Object {
     /// The type of the object
     #[serde(rename = "type")]
     pub object_type: ObjectType,
-    
+
     /// The identifier for this object
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<Url>,
-    
+
     /// A simple, human-readable, plain-text name for the object
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    
+
     /// A natural language summarization of the object
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
-    
+
     /// The content of the object
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    
+
     /// The URL of the object
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<Url>,
-    
+
     /// When the object was published
     #[serde(skip_serializing_if = "Option::is_none")]
     pub published: Option<DateTime<Utc>>,
-    
+
     /// When the object was updated
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated: Option<DateTime<Utc>>,
-    
+
     /// The author of the object
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributed_to: Option<ObjectOrLink>,
-    
+
     /// Additional properties not defined in the specification
     #[serde(flatten)]
     pub additional_properties: HashMap<String, Value>,
@@ -141,23 +141,23 @@ pub struct Link {
     /// The type of the link (always "Link")
     #[serde(rename = "type")]
     pub link_type: ObjectType,
-    
+
     /// Target resource of the link
     #[serde(skip_serializing_if = "Option::is_none")]
     pub href: Option<Url>,
-    
+
     /// A human-readable name for the link
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    
+
     /// The MIME media type of the link
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
-    
+
     /// A hint about the language of the linked resource
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hreflang: Option<String>,
-    
+
     /// Additional properties not defined in the specification
     #[serde(flatten)]
     pub additional_properties: HashMap<String, Value>,
@@ -295,25 +295,27 @@ impl<'de> Deserialize<'de> for ActivityPubEntity {
                 // Determine which entity to deserialize based on the type
                 match type_str {
                     // Activity types
-                    "Create" | "Follow" | "Accept" | "Reject" | "Add" | "Remove" | 
-                    "Like" | "Announce" | "Undo" | "Update" | "Delete" | "Block" | 
-                    "Offer" | "Invite" => {
+                    "Create" | "Follow" | "Accept" | "Reject" | "Add" | "Remove" | "Like"
+                    | "Announce" | "Undo" | "Update" | "Delete" | "Block" | "Offer" | "Invite" => {
                         let activity: Activity = serde_json::from_value(value.clone())
                             .map_err(serde::de::Error::custom)?;
                         Ok(ActivityPubEntity::Activity(activity))
-                    },
+                    }
                     // Collection types
-                    "Collection" | "OrderedCollection" | "CollectionPage" | "OrderedCollectionPage" => {
+                    "Collection"
+                    | "OrderedCollection"
+                    | "CollectionPage"
+                    | "OrderedCollectionPage" => {
                         let collection: Collection = serde_json::from_value(value.clone())
                             .map_err(serde::de::Error::custom)?;
                         Ok(ActivityPubEntity::Collection(collection))
-                    },
+                    }
                     // Link type
                     "Link" => {
                         let link: Link = serde_json::from_value(value.clone())
                             .map_err(serde::de::Error::custom)?;
                         Ok(ActivityPubEntity::Link(link))
-                    },
+                    }
                     // Default to Object for all other types
                     _ => {
                         let object: Object = serde_json::from_value(value.clone())
@@ -323,14 +325,14 @@ impl<'de> Deserialize<'de> for ActivityPubEntity {
                 }
             } else {
                 // Type value is not a string, default to Object
-                let object: Object = serde_json::from_value(value.clone())
-                    .map_err(serde::de::Error::custom)?;
+                let object: Object =
+                    serde_json::from_value(value.clone()).map_err(serde::de::Error::custom)?;
                 Ok(ActivityPubEntity::Object(object))
             }
         } else {
             // If no type is specified, try to deserialize as an Object
-            let object: Object = serde_json::from_value(value.clone())
-                .map_err(serde::de::Error::custom)?;
+            let object: Object =
+                serde_json::from_value(value.clone()).map_err(serde::de::Error::custom)?;
             Ok(ActivityPubEntity::Object(object))
         }
     }
@@ -366,7 +368,10 @@ mod tests {
 
         if let ActivityPubEntity::Activity(activity) = result {
             assert_eq!(activity.activity_type, ActivityType::Create);
-            assert_eq!(activity.id, Some(Url::parse("https://example.com/activities/1").unwrap()));
+            assert_eq!(
+                activity.id,
+                Some(Url::parse("https://example.com/activities/1").unwrap())
+            );
 
             // Check actor field - should be a URL string in this case
             if let Some(ObjectOrLink::Url(actor_url)) = &activity.actor {
@@ -378,7 +383,10 @@ mod tests {
             // Check object field - should be an Object
             if let Some(ObjectOrLink::Object(object)) = &activity.object {
                 assert_eq!(object.object_type, ObjectType::Note);
-                assert_eq!(object.id, Some(Url::parse("https://example.com/notes/1").unwrap()));
+                assert_eq!(
+                    object.id,
+                    Some(Url::parse("https://example.com/notes/1").unwrap())
+                );
                 assert_eq!(object.content, Some("Hello, world!".to_string()));
             } else {
                 panic!("Object should be an Object type");
@@ -407,16 +415,25 @@ mod tests {
 
         if let ActivityPubEntity::Object(object) = result {
             assert_eq!(object.object_type, ObjectType::Person);
-            assert_eq!(object.id, Some(Url::parse("https://example.com/users/bob").unwrap()));
+            assert_eq!(
+                object.id,
+                Some(Url::parse("https://example.com/users/bob").unwrap())
+            );
             assert_eq!(object.name, Some("Bob".to_string()));
 
             // Check additional properties
-            assert!(object.additional_properties.contains_key("preferredUsername"));
+            assert!(
+                object
+                    .additional_properties
+                    .contains_key("preferredUsername")
+            );
             assert!(object.additional_properties.contains_key("inbox"));
             assert!(object.additional_properties.contains_key("outbox"));
             assert!(object.additional_properties.contains_key("followers"));
 
-            if let Some(Value::String(username)) = object.additional_properties.get("preferredUsername") {
+            if let Some(Value::String(username)) =
+                object.additional_properties.get("preferredUsername")
+            {
                 assert_eq!(username, "bob123");
             } else {
                 panic!("preferredUsername should be a string");
@@ -449,7 +466,10 @@ mod tests {
 
         if let ActivityPubEntity::Collection(collection) = result {
             assert_eq!(collection.collection_type, ObjectType::Collection);
-            assert_eq!(collection.id, Some(Url::parse("https://example.com/collections/public").unwrap()));
+            assert_eq!(
+                collection.id,
+                Some(Url::parse("https://example.com/collections/public").unwrap())
+            );
             assert_eq!(collection.total_items, Some(2));
             assert_eq!(collection.items.len(), 2);
 
@@ -457,9 +477,12 @@ mod tests {
             match &collection.items[0] {
                 ObjectOrLink::Object(object) => {
                     assert_eq!(object.object_type, ObjectType::Note);
-                    assert_eq!(object.id, Some(Url::parse("https://example.com/notes/1").unwrap()));
+                    assert_eq!(
+                        object.id,
+                        Some(Url::parse("https://example.com/notes/1").unwrap())
+                    );
                     assert_eq!(object.content, Some("First note".to_string()));
-                },
+                }
                 _ => panic!("First item should be an Object"),
             }
 
@@ -467,7 +490,7 @@ mod tests {
             match &collection.items[1] {
                 ObjectOrLink::Url(url) => {
                     assert_eq!(url.as_str(), "https://example.com/notes/2");
-                },
+                }
                 _ => panic!("Second item should be a URL"),
             }
         } else {

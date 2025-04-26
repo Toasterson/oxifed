@@ -6,12 +6,12 @@
 //! The module supports various signing algorithms, key types and signature parameters
 //! as specified in the standard.
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use chrono::{DateTime, Duration, Utc};
 use regex::Regex;
 use reqwest::{
-    header::{HeaderName, HeaderValue},
     Request,
+    header::{HeaderName, HeaderValue},
 };
 use ring::signature::{
     self, EcdsaKeyPair, Ed25519KeyPair, KeyPair, RsaKeyPair, UnparsedPublicKey,
@@ -51,10 +51,10 @@ impl FromStr for SignatureAlgorithm {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "rsa-v1_5-sha256" => Ok(SignatureAlgorithm::RsaSha256),
-            "rsa-pss-sha512" => Ok(SignatureAlgorithm::RsaPssSha512),
-            "ecdsa-p256-sha256" => Ok(SignatureAlgorithm::EcdsaP256Sha256),
-            "ed25519" => Ok(SignatureAlgorithm::Ed25519),
+            "ed25519" => Ok(Self::Ed25519),
+            "ecdsa-p256-sha256" => Ok(Self::EcdsaP256Sha256),
+            "rsa-v1_5-sha256" => Ok(Self::RsaSha256),
+            "rsa-pss-sha512" => Ok(Self::RsaPssSha512),
             _ => Err(SignatureError::UnsupportedAlgorithm(s.to_string())),
         }
     }
@@ -235,20 +235,6 @@ impl FromStr for ComponentIdentifier {
     }
 }
 
-impl FromStr for SignatureAlgorithm {
-    type Err = SignatureError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "ed25519" => Ok(Self::Ed25519),
-            "ecdsa-p256-sha256" => Ok(Self::EcdsaP256Sha256),
-            "rsa-v1_5-sha256" => Ok(Self::RsaSha256),
-            "rsa-pss-sha512" => Ok(Self::RsaPssSha512),
-            _ => Err(SignatureError::UnsupportedAlgorithm(s.to_string())),
-        }
-    }
-}
-
 /// Configuration for HTTP signature creation
 #[derive(Debug, Clone)]
 pub struct SignatureConfig {
@@ -291,7 +277,7 @@ pub struct SignatureParameters {
 }
 
 impl SignatureParameters {
-    /// Create a new signature parameters set with default values
+    /// Create a new signature parameter set with default values
     pub fn new() -> Self {
         Self {
             created: Some(Utc::now()),
@@ -446,7 +432,7 @@ impl Signature {
             return Err(SignatureError::InvalidSignatureFormat);
         }
 
-        let sig_value = &sig_value[1..]; // Remove the : prefix
+        let sig_value = &sig_value[1..]; // Remove the prefix
 
         // Parse components and parameters from the input value
         // Components are quoted strings like "content-type" followed by parameters
@@ -491,7 +477,7 @@ impl HttpSignature {
     ) -> Result<String, SignatureError> {
         let mut base_lines = Vec::new();
 
-        // Add components to signature base
+        // Add components to the signature base
         for component in components {
             let (name, value) = Self::get_component_value(req, component)?;
             base_lines.push(format!("\"{}\":{}", name, value));
@@ -586,7 +572,7 @@ impl HttpSignature {
         params.key_id = Some(config.key_id.clone());
         params.algorithm = Some(config.algorithm.clone());
 
-        // Create signature base
+        // Create a signature base
         let signature_base = Self::create_signature_base(req, &config.components, &params)?;
 
         // Create a secure random number generator
@@ -638,18 +624,18 @@ impl HttpSignature {
             if let Some(created) = signature.parameters.created {
                 let now = Utc::now();
 
-                // Check if signature is created in the future (with a small tolerance)
+                // Check if a signature is created in the future (with a small tolerance)
                 if created > now + Duration::seconds(30) {
                     return Err(SignatureError::SignatureCreatedInFuture);
                 }
 
-                // Check if signature is too old
+                // Check if the signature is too old
                 let age = now.timestamp() - created.timestamp();
                 if age > max_age {
                     return Err(SignatureError::SignatureExpired);
                 }
             } else {
-                // If max_age is specified, created parameter is required
+                // If max_age is specified, a created parameter is required
                 return Err(SignatureError::MissingParameter("created".to_string()));
             }
         }
@@ -897,5 +883,95 @@ mod tests {
         assert!(base.contains("\"content-type\": application/json"));
         assert!(base.contains("\"digest\": sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE="));
         assert!(base.contains("\"@signature-params\":created=1618884475"));
+    }
+
+    #[test]
+    fn test_verify_signature() {
+        // Use Ed25519 test keys in PEM format
+        // Note: ring expects the raw key without PEM headers/footers, so we need to decode the PEM format
+        let private_key_pem = include_str!("../test-data/ed25519_test_key.pem");
+        let public_key_pem = include_str!("../test-data/ed25519_test_public_key.pem");
+
+        // Extract the base64 part from PEM format (between the header and footer lines)
+        let extract_der = |pem: &str| -> Vec<u8> {
+            let lines: Vec<&str> = pem
+                .lines()
+                .filter(|line| !line.starts_with("-----"))
+                .collect();
+            BASE64.decode(lines.join("")).unwrap()
+        };
+
+        let private_key = extract_der(private_key_pem);
+        let public_key = extract_der(public_key_pem);
+
+        // Create a test request
+        let client = Client::new();
+        let mut req = client
+            .post("https://example.com/foo?param=value")
+            .header("host", "example.com")
+            .header("content-type", "application/json")
+            .header("date", "Tue, 20 Apr 2021 02:07:55 GMT")
+            .header(
+                "digest",
+                "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=",
+            )
+            .build()
+            .unwrap();
+
+        // Create signature configuration
+        let sig_config = SignatureConfig {
+            algorithm: SignatureAlgorithm::Ed25519,
+            parameters: SignatureParameters::new(),
+            key_id: "test-key-ed25519".to_string(),
+            components: vec![
+                ComponentIdentifier::Method,
+                ComponentIdentifier::Path,
+                ComponentIdentifier::Header("host".to_string()),
+                ComponentIdentifier::Header("date".to_string()),
+                ComponentIdentifier::Header("content-type".to_string()),
+                ComponentIdentifier::Header("digest".to_string()),
+            ],
+            private_key: private_key.to_vec(),
+        };
+
+        // Sign the request
+        HttpSignature::sign_request(&mut req, &sig_config).unwrap();
+
+        // Verify that the signature header was added
+        assert!(req.headers().contains_key("signature"));
+        assert!(req.headers().contains_key("signature-input"));
+
+        // Create verification configuration
+        let verify_config =
+            VerificationConfig::new(public_key.to_vec(), SignatureAlgorithm::Ed25519)
+                .with_expected_key_id("test-key-ed25519".to_string())
+                .with_required_components(vec![
+                    ComponentIdentifier::Method,
+                    ComponentIdentifier::Path,
+                ]);
+
+        // Verify the signature
+        let result = HttpSignature::verify_request(&req, &verify_config);
+        assert!(
+            result.is_ok(),
+            "Signature verification failed: {:?}",
+            result.err()
+        );
+
+        // Test with the wrong algorithm
+        let wrong_alg_config =
+            VerificationConfig::new(public_key.to_vec(), SignatureAlgorithm::RsaSha256);
+        assert!(HttpSignature::verify_request(&req, &wrong_alg_config).is_err());
+
+        // Test with a wrong key
+        let wrong_key_config =
+            VerificationConfig::new(b"wrong_key".to_vec(), SignatureAlgorithm::Ed25519);
+        assert!(HttpSignature::verify_request(&req, &wrong_key_config).is_err());
+
+        // Test with the wrong key ID
+        let wrong_keyid_config =
+            VerificationConfig::new(public_key.to_vec(), SignatureAlgorithm::Ed25519)
+                .with_expected_key_id("wrong-key-id".to_string());
+        assert!(HttpSignature::verify_request(&req, &wrong_keyid_config).is_err());
     }
 }
