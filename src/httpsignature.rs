@@ -3,18 +3,23 @@
 //! This module provides functionality for creating and verifying HTTP signatures
 //! according to the specifications in RFC 9421 (https://www.rfc-editor.org/rfc/rfc9421.html).
 //!
-//! The module supports various signing algorithms, key types, and signature parameters
+//! The module supports various signing algorithms, key types and signature parameters
 //! as specified in the standard.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Duration, Utc};
-use reqwest::{header::{HeaderMap, HeaderName, HeaderValue}, Method, Request, Response};
 use regex::Regex;
-use ring::signature::{self, EcdsaKeyPair, Ed25519KeyPair, KeyPair, RsaKeyPair};
-use std::collections::{HashMap, HashSet};
+use reqwest::{
+    header::{HeaderName, HeaderValue},
+    Request,
+};
+use ring::signature::{
+    self, EcdsaKeyPair, Ed25519KeyPair, KeyPair, RsaKeyPair, UnparsedPublicKey,
+    VerificationAlgorithm,
+};
+use std::collections::HashSet;
 use std::str::FromStr;
 use thiserror::Error;
-use url::Url;
 
 /// Algorithm supported for HTTP signatures
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -60,39 +65,107 @@ impl FromStr for SignatureAlgorithm {
 pub enum SignatureError {
     #[error("Invalid signature parameter: {0}")]
     InvalidParameter(String),
-    
+
     #[error("Missing required parameter: {0}")]
     MissingParameter(String),
-    
+
     #[error("Unsupported algorithm: {0}")]
     UnsupportedAlgorithm(String),
-    
+
     #[error("Invalid key format: {0}")]
     InvalidKeyFormat(String),
-    
+
     #[error("Signature verification failed")]
     VerificationFailed,
-    
+
     #[error("Signature expired")]
     SignatureExpired,
-    
+
     #[error("Signature creation date in the future")]
     SignatureCreatedInFuture,
-    
+
     #[error("Cryptographic operation failed: {0}")]
     CryptoError(String),
-    
+
     #[error("Base64 encoding/decoding error: {0}")]
     Base64Error(#[from] base64::DecodeError),
-    
+
     #[error("Invalid HTTP header: {0}")]
     InvalidHeader(String),
-    
+
     #[error("Invalid signature input: {0}")]
     InvalidSignatureInput(String),
-    
+
     #[error("Request error: {0}")]
     RequestError(String),
+
+    #[error("Signature not found in request")]
+    SignatureNotFound,
+
+    #[error("Missing signature components")]
+    MissingSignatureComponents,
+
+    #[error("Invalid signature format")]
+    InvalidSignatureFormat,
+
+    #[error("Key not found: {0}")]
+    KeyNotFound(String),
+}
+
+/// Configuration for HTTP signature verification
+#[derive(Debug, Clone)]
+pub struct VerificationConfig {
+    /// Public key used for verification
+    pub public_key: Vec<u8>,
+
+    /// Algorithm expected for verification
+    pub algorithm: SignatureAlgorithm,
+
+    /// Maximum allowed signature age in seconds (None for no check)
+    pub max_age: Option<i64>,
+
+    /// Required components that must be included in the signature
+    pub required_components: Option<Vec<ComponentIdentifier>>,
+
+    /// Expected key ID that must match (None for no check)
+    pub expected_key_id: Option<String>,
+}
+
+impl VerificationConfig {
+    /// Create a new verification configuration with the given public key and algorithm
+    pub fn new(public_key: Vec<u8>, algorithm: SignatureAlgorithm) -> Self {
+        Self {
+            public_key,
+            algorithm,
+            max_age: Some(300), // Default to 5 minutes max age
+            required_components: None,
+            expected_key_id: None,
+        }
+    }
+
+    /// Set the maximum allowed signature age in seconds
+    pub fn with_max_age(mut self, max_age: i64) -> Self {
+        self.max_age = Some(max_age);
+        self
+    }
+
+    /// Disable the maximum age check
+    pub fn without_max_age(mut self) -> Self {
+        self.max_age = None;
+        self
+    }
+
+    /// Set required components that must be included in the signature
+    pub fn with_required_components(mut self, components: Vec<ComponentIdentifier>) -> Self {
+        self.required_components = Some(components);
+        self
+    }
+
+    /// Set the expected key ID
+    pub fn with_expected_key_id(mut self, key_id: String) -> Self {
+        self.expected_key_id = Some(key_id);
+        self
+    }
 }
 
 /// Component identifier for HTTP message components
@@ -100,25 +173,25 @@ pub enum SignatureError {
 pub enum ComponentIdentifier {
     /// HTTP message header, lowercase, standard or extension
     Header(String),
-    
+
     /// HTTP method, uppercase
     Method,
-    
+
     /// Target URI
     TargetUri,
-    
+
     /// Request target, original form of URI
     RequestTarget,
-    
+
     /// HTTP request path, including query string
     Path,
-    
+
     /// HTTP request query parameters
     Query,
-    
+
     /// HTTP status code
     Status,
-    
+
     /// Request and response body digests
     Digest,
 }
@@ -151,10 +224,27 @@ impl FromStr for ComponentIdentifier {
                 "@path" => Ok(ComponentIdentifier::Path),
                 "@query" => Ok(ComponentIdentifier::Query),
                 "@status" => Ok(ComponentIdentifier::Status),
-                _ => Err(SignatureError::InvalidParameter(format!("Unknown derived component: {}", s))),
+                _ => Err(SignatureError::InvalidParameter(format!(
+                    "Unknown derived component: {}",
+                    s
+                ))),
             }
         } else {
             Ok(ComponentIdentifier::Header(s.to_lowercase()))
+        }
+    }
+}
+
+impl FromStr for SignatureAlgorithm {
+    type Err = SignatureError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ed25519" => Ok(Self::Ed25519),
+            "ecdsa-p256-sha256" => Ok(Self::EcdsaP256Sha256),
+            "rsa-v1_5-sha256" => Ok(Self::RsaSha256),
+            "rsa-pss-sha512" => Ok(Self::RsaPssSha512),
+            _ => Err(SignatureError::UnsupportedAlgorithm(s.to_string())),
         }
     }
 }
@@ -164,16 +254,16 @@ impl FromStr for ComponentIdentifier {
 pub struct SignatureConfig {
     /// Signing algorithm to use
     pub algorithm: SignatureAlgorithm,
-    
+
     /// Signature parameters to include
     pub parameters: SignatureParameters,
-    
+
     /// Key ID for identifying the key
     pub key_id: String,
-    
+
     /// Components to include in the signature
     pub components: Vec<ComponentIdentifier>,
-    
+
     /// Private key for signing
     pub private_key: Vec<u8>,
 }
@@ -183,19 +273,19 @@ pub struct SignatureConfig {
 pub struct SignatureParameters {
     /// Time when the signature was created
     pub created: Option<DateTime<Utc>>,
-    
+
     /// Time when the signature expires
     pub expires: Option<DateTime<Utc>>,
-    
+
     /// Nonce value for preventing replay attacks
     pub nonce: Option<String>,
-    
+
     /// Key ID for identifying the key
     pub key_id: Option<String>,
-    
+
     /// Tag for identifying this signature among multiple signatures
     pub tag: Option<String>,
-    
+
     /// Algorithm used for the signature
     pub algorithm: Option<SignatureAlgorithm>,
 }
@@ -213,61 +303,179 @@ impl SignatureParameters {
     /// Parse signature parameters from a signature input string
     pub fn from_input(input: &str) -> Result<Self, SignatureError> {
         let mut params = Self::default();
-        let input_regex = Regex::new(r#"(?:([a-zA-Z0-9_-]+)=(?:"([^"]*)"|([^;,\s]*)))(?:;|$|\s*,)"#).unwrap();
-        
+        let input_regex =
+            Regex::new(r#"([a-zA-Z0-9_-]+)=(?:"([^"]*)"|([^;,\s]*))(?:;|$|\s*,)"#).unwrap();
+
         for cap in input_regex.captures_iter(input) {
             let key = cap.get(1).unwrap().as_str();
             let value = cap.get(2).or_else(|| cap.get(3)).unwrap().as_str();
-            
+
             match key {
                 "created" => {
-                    let timestamp = value.parse::<i64>()
-                        .map_err(|_| SignatureError::InvalidParameter(format!("Invalid created timestamp: {}", value)))?;
-                    params.created = Some(DateTime::from_timestamp(timestamp, 0)
-                        .ok_or_else(|| SignatureError::InvalidParameter(format!("Invalid created timestamp: {}", value)))?);
-                },
+                    let timestamp = value.parse::<i64>().map_err(|_| {
+                        SignatureError::InvalidParameter(format!(
+                            "Invalid created timestamp: {}",
+                            value
+                        ))
+                    })?;
+                    params.created =
+                        Some(DateTime::from_timestamp(timestamp, 0).ok_or_else(|| {
+                            SignatureError::InvalidParameter(format!(
+                                "Invalid created timestamp: {}",
+                                value
+                            ))
+                        })?);
+                }
                 "expires" => {
-                    let timestamp = value.parse::<i64>()
-                        .map_err(|_| SignatureError::InvalidParameter(format!("Invalid expires timestamp: {}", value)))?;
-                    params.expires = Some(DateTime::from_timestamp(timestamp, 0)
-                        .ok_or_else(|| SignatureError::InvalidParameter(format!("Invalid expires timestamp: {}", value)))?);
-                },
+                    let timestamp = value.parse::<i64>().map_err(|_| {
+                        SignatureError::InvalidParameter(format!(
+                            "Invalid expires timestamp: {}",
+                            value
+                        ))
+                    })?;
+                    params.expires =
+                        Some(DateTime::from_timestamp(timestamp, 0).ok_or_else(|| {
+                            SignatureError::InvalidParameter(format!(
+                                "Invalid expires timestamp: {}",
+                                value
+                            ))
+                        })?);
+                }
                 "nonce" => params.nonce = Some(value.to_string()),
                 "keyid" => params.key_id = Some(value.to_string()),
                 "tag" => params.tag = Some(value.to_string()),
                 "alg" => params.algorithm = Some(SignatureAlgorithm::from_str(value)?),
-                _ => return Err(SignatureError::InvalidParameter(format!("Unknown parameter: {}", key))),
+                _ => {
+                    return Err(SignatureError::InvalidParameter(format!(
+                        "Unknown parameter: {}",
+                        key
+                    )));
+                }
             }
         }
-        
+
         Ok(params)
     }
-    
+
     /// Format parameters for inclusion in a signature input
     pub fn format_parameters(&self) -> String {
         let mut params = Vec::new();
-        
+
         if let Some(created) = self.created {
             params.push(format!("created={}", created.timestamp()));
         }
-        
+
         if let Some(expires) = self.expires {
             params.push(format!("expires={}", expires.timestamp()));
         }
-        
+
         if let Some(nonce) = &self.nonce {
             params.push(format!("nonce=\"{}\"", nonce));
         }
-        
+
         if let Some(key_id) = &self.key_id {
             params.push(format!("keyid=\"{}\"", key_id));
         }
-        
+
         if let Some(algorithm) = &self.algorithm {
             params.push(format!("alg=\"{}\"", algorithm.as_str()));
         }
-        
+
+        if let Some(tag) = &self.tag {
+            params.push(format!("tag=\"{}\"", tag));
+        }
+
         params.join(";")
+    }
+}
+
+/// Parsed signature information from request headers
+#[derive(Debug)]
+pub struct Signature {
+    /// Tag identifying this signature
+    pub tag: String,
+
+    /// Signature value (base64 encoded)
+    pub signature: String,
+
+    /// Components included in the signature
+    pub components: Vec<ComponentIdentifier>,
+
+    /// Parameters included with the signature
+    pub parameters: SignatureParameters,
+}
+
+impl Signature {
+    /// Parse signature headers from a request
+    pub fn from_request(req: &Request) -> Result<Self, SignatureError> {
+        // Get signature-input header
+        let signature_input = req
+            .headers()
+            .get("signature-input")
+            .ok_or(SignatureError::SignatureNotFound)?
+            .to_str()
+            .map_err(|_| {
+                SignatureError::InvalidHeader("Non-ASCII signature-input header".to_string())
+            })?;
+
+        // Get signature header
+        let signature = req
+            .headers()
+            .get("signature")
+            .ok_or(SignatureError::SignatureNotFound)?
+            .to_str()
+            .map_err(|_| SignatureError::InvalidHeader("Non-ASCII signature header".to_string()))?;
+
+        // Parse the signature-input header (expected format: "sig1=...")
+        let sig_input_parts: Vec<&str> = signature_input.splitn(2, '=').collect();
+        if sig_input_parts.len() != 2 {
+            return Err(SignatureError::InvalidSignatureFormat);
+        }
+
+        let tag = sig_input_parts[0].trim();
+        let input_value = sig_input_parts[1].trim();
+
+        // Parse the signature header (expected format: "sig1=:...")
+        let sig_parts: Vec<&str> = signature.splitn(2, '=').collect();
+        if sig_parts.len() != 2 || sig_parts[0].trim() != tag {
+            return Err(SignatureError::InvalidSignatureFormat);
+        }
+
+        let sig_value = sig_parts[1].trim();
+        if !sig_value.starts_with(':') {
+            return Err(SignatureError::InvalidSignatureFormat);
+        }
+
+        let sig_value = &sig_value[1..]; // Remove the : prefix
+
+        // Parse components and parameters from the input value
+        // Components are quoted strings like "content-type" followed by parameters
+        let component_regex = Regex::new(r#""([^"]+)""#).unwrap();
+        let mut components = Vec::new();
+
+        for cap in component_regex.captures_iter(input_value) {
+            let component_name = cap.get(1).unwrap().as_str();
+            components.push(ComponentIdentifier::from_str(component_name)?);
+        }
+
+        if components.is_empty() {
+            return Err(SignatureError::MissingSignatureComponents);
+        }
+
+        // Parse parameters (they start after all components with a semicolon)
+        let params_start = input_value
+            .rfind(';')
+            .ok_or(SignatureError::InvalidSignatureFormat)?;
+
+        let params_str = &input_value[params_start + 1..];
+        let parameters = SignatureParameters::from_input(params_str)?;
+
+        Ok(Self {
+            tag: tag.to_string(),
+            signature: sig_value.to_string(),
+            components,
+            parameters,
+        })
     }
 }
 
@@ -282,46 +490,54 @@ impl HttpSignature {
         params: &SignatureParameters,
     ) -> Result<String, SignatureError> {
         let mut base_lines = Vec::new();
-        
+
         // Add components to signature base
         for component in components {
             let (name, value) = Self::get_component_value(req, component)?;
             base_lines.push(format!("\"{}\":{}", name, value));
         }
-        
+
         // Add parameters
-        base_lines.push(format!("\"@signature-params\":{}", params.format_parameters()));
-        
+        base_lines.push(format!(
+            "\"@signature-params\":{}",
+            params.format_parameters()
+        ));
+
         Ok(base_lines.join("\n"))
     }
-    
+
     /// Get a component value from a request
     fn get_component_value(
         req: &Request,
         component: &ComponentIdentifier,
     ) -> Result<(String, String), SignatureError> {
         let name = component.canonical_name();
-        
+
         match component {
             ComponentIdentifier::Header(header_name) => {
                 let header = HeaderName::from_str(header_name)
                     .map_err(|_| SignatureError::InvalidHeader(header_name.clone()))?;
-                
+
                 if let Some(value) = req.headers().get(&header) {
-                    let value_str = value.to_str()
-                        .map_err(|_| SignatureError::InvalidHeader(format!("Non-ASCII value in header: {}", header_name)))?;
+                    let value_str = value.to_str().map_err(|_| {
+                        SignatureError::InvalidHeader(format!(
+                            "Non-ASCII value in header: {}",
+                            header_name
+                        ))
+                    })?;
                     Ok((name, format!(" {}", value_str)))
                 } else {
-                    Err(SignatureError::InvalidHeader(format!("Header not found: {}", header_name)))
+                    Err(SignatureError::InvalidHeader(format!(
+                        "Header not found: {}",
+                        header_name
+                    )))
                 }
-            },
-            ComponentIdentifier::Method => {
-                Ok((name, format!(" {}", req.method().as_str())))
-            },
+            }
+            ComponentIdentifier::Method => Ok((name, format!(" {}", req.method().as_str()))),
             ComponentIdentifier::TargetUri => {
                 let url = req.url();
                 Ok((name, format!(" {}", url)))
-            },
+            }
             ComponentIdentifier::RequestTarget => {
                 let url = req.url();
                 let path_and_query = if let Some(query) = url.query() {
@@ -329,79 +545,214 @@ impl HttpSignature {
                 } else {
                     url.path().to_string()
                 };
-                
+
                 Ok((name, format!(" {}", path_and_query)))
-            },
+            }
             ComponentIdentifier::Path => {
                 let path = req.url().path();
                 Ok((name, format!(" {}", path)))
-            },
+            }
             ComponentIdentifier::Query => {
                 let query = req.url().query().unwrap_or("");
                 Ok((name, format!(" {}", query)))
-            },
+            }
             ComponentIdentifier::Status => {
                 // Not available for requests
-                Err(SignatureError::InvalidParameter("@status not available for requests".to_string()))
-            },
+                Err(SignatureError::InvalidParameter(
+                    "@status not available for requests".to_string(),
+                ))
+            }
             ComponentIdentifier::Digest => {
                 if let Some(digest) = req.headers().get("digest") {
-                    let digest_str = digest.to_str()
-                        .map_err(|_| SignatureError::InvalidHeader("Non-ASCII value in Digest header".to_string()))?;
+                    let digest_str = digest.to_str().map_err(|_| {
+                        SignatureError::InvalidHeader(
+                            "Non-ASCII value in Digest header".to_string(),
+                        )
+                    })?;
                     Ok((name, format!(" {}", digest_str)))
                 } else {
-                    Err(SignatureError::InvalidHeader("Digest header not found".to_string()))
+                    Err(SignatureError::InvalidHeader(
+                        "Digest header not found".to_string(),
+                    ))
                 }
-            },
+            }
         }
     }
-    
+
     /// Create a signature for a request using the given configuration
-    pub fn sign_request(
-        req: &mut Request,
-        config: &SignatureConfig,
-    ) -> Result<(), SignatureError> {
+    pub fn sign_request(req: &mut Request, config: &SignatureConfig) -> Result<(), SignatureError> {
         // Create signature parameters
         let mut params = SignatureParameters::new();
         params.key_id = Some(config.key_id.clone());
         params.algorithm = Some(config.algorithm.clone());
-        
+
         // Create signature base
         let signature_base = Self::create_signature_base(req, &config.components, &params)?;
-        
+
         // Create a secure random number generator
         let rng = ring::rand::SystemRandom::new();
-        
+
         // Sign the base with the secure random number generator
-        let signature = Self::create_signature(&signature_base, &config.algorithm, &config.private_key, &rng)?;
-        
+        let signature = Self::create_signature(
+            &signature_base,
+            &config.algorithm,
+            &config.private_key,
+            &rng,
+        )?;
+
         // Format signature input header
         let mut signature_input = String::new();
         for component in &config.components {
             signature_input.push_str(&format!("\"{}\" ", component.canonical_name()));
         }
         signature_input.push_str(&format!(";{}", params.format_parameters()));
-        
+
         // Add signature headers
         let sig_input_header = HeaderValue::from_str(&format!("sig1={}", signature_input))
-            .map_err(|_| SignatureError::InvalidHeader("Invalid signature-input header".to_string()))?;
-            
-        req.headers_mut().insert(
-            HeaderName::from_static("signature-input"),
-            sig_input_header,
-        );
-        
+            .map_err(|_| {
+                SignatureError::InvalidHeader("Invalid signature-input header".to_string())
+            })?;
+
+        req.headers_mut()
+            .insert(HeaderName::from_static("signature-input"), sig_input_header);
+
         let signature_header = HeaderValue::from_str(&format!("sig1=:{}", signature))
             .map_err(|_| SignatureError::InvalidHeader("Invalid signature header".to_string()))?;
-            
-        req.headers_mut().insert(
-            HeaderName::from_static("signature"),
-            signature_header,
-        );
-        
+
+        req.headers_mut()
+            .insert(HeaderName::from_static("signature"), signature_header);
+
         Ok(())
     }
-    
+
+    /// Verify a signature on a request using the given verification configuration
+    pub fn verify_request(
+        req: &Request,
+        config: &VerificationConfig,
+    ) -> Result<(), SignatureError> {
+        // Parse the signature from the request
+        let signature = Signature::from_request(req)?;
+
+        // Check signature freshness if max_age is set
+        if let Some(max_age) = config.max_age {
+            if let Some(created) = signature.parameters.created {
+                let now = Utc::now();
+
+                // Check if signature is created in the future (with a small tolerance)
+                if created > now + Duration::seconds(30) {
+                    return Err(SignatureError::SignatureCreatedInFuture);
+                }
+
+                // Check if signature is too old
+                let age = now.timestamp() - created.timestamp();
+                if age > max_age {
+                    return Err(SignatureError::SignatureExpired);
+                }
+            } else {
+                // If max_age is specified, created parameter is required
+                return Err(SignatureError::MissingParameter("created".to_string()));
+            }
+        }
+
+        // Check for expiration
+        if let Some(expires) = signature.parameters.expires {
+            if expires < Utc::now() {
+                return Err(SignatureError::SignatureExpired);
+            }
+        }
+
+        // Check key ID if expected
+        if let Some(expected_key_id) = &config.expected_key_id {
+            if let Some(key_id) = &signature.parameters.key_id {
+                if key_id != expected_key_id {
+                    return Err(SignatureError::KeyNotFound(key_id.clone()));
+                }
+            } else {
+                return Err(SignatureError::MissingParameter("keyid".to_string()));
+            }
+        }
+
+        // Check required components
+        if let Some(required) = &config.required_components {
+            let signature_components: HashSet<_> = signature.components.iter().collect();
+            for required_component in required {
+                if !signature_components.contains(required_component) {
+                    return Err(SignatureError::MissingSignatureComponents);
+                }
+            }
+        }
+
+        // Recreate the signature base
+        let signature_base =
+            Self::create_signature_base(req, &signature.components, &signature.parameters)?;
+
+        // Verify the signature
+        Self::verify_signature(
+            &signature_base,
+            &signature.signature,
+            &config.algorithm,
+            &config.public_key,
+        )?;
+
+        Ok(())
+    }
+
+    /// Verify a signature using the specified algorithm and public key
+    fn verify_signature(
+        signature_base: &str,
+        signature_b64: &str,
+        algorithm: &SignatureAlgorithm,
+        public_key: &[u8],
+    ) -> Result<(), SignatureError> {
+        // Decode the signature from base64
+        let signature_bytes = BASE64
+            .decode(signature_b64)
+            .map_err(|e| SignatureError::Base64Error(e))?;
+
+        match algorithm {
+            SignatureAlgorithm::Ed25519 => {
+                let verification_algorithm = &signature::ED25519;
+                let public_key = UnparsedPublicKey::new(verification_algorithm, public_key);
+
+                public_key
+                    .verify(signature_base.as_bytes(), &signature_bytes)
+                    .map_err(|_| SignatureError::VerificationFailed)?;
+
+                Ok(())
+            }
+            SignatureAlgorithm::EcdsaP256Sha256 => {
+                let verification_algorithm = &signature::ECDSA_P256_SHA256_ASN1;
+                let public_key = UnparsedPublicKey::new(verification_algorithm, public_key);
+
+                public_key
+                    .verify(signature_base.as_bytes(), &signature_bytes)
+                    .map_err(|_| SignatureError::VerificationFailed)?;
+
+                Ok(())
+            }
+            SignatureAlgorithm::RsaSha256 => {
+                let verification_algorithm = &signature::RSA_PKCS1_2048_8192_SHA256;
+                let public_key = UnparsedPublicKey::new(verification_algorithm, public_key);
+
+                public_key
+                    .verify(signature_base.as_bytes(), &signature_bytes)
+                    .map_err(|_| SignatureError::VerificationFailed)?;
+
+                Ok(())
+            }
+            SignatureAlgorithm::RsaPssSha512 => {
+                let verification_algorithm = &signature::RSA_PSS_2048_8192_SHA512;
+                let public_key = UnparsedPublicKey::new(verification_algorithm, public_key);
+
+                public_key
+                    .verify(signature_base.as_bytes(), &signature_bytes)
+                    .map_err(|_| SignatureError::VerificationFailed)?;
+
+                Ok(())
+            }
+        }
+    }
+
     /// Create the actual signature using the specified algorithm and private key
     fn create_signature(
         signature_base: &str,
@@ -411,54 +762,69 @@ impl HttpSignature {
     ) -> Result<String, SignatureError> {
         let signature = match algorithm {
             SignatureAlgorithm::Ed25519 => {
-                let key_pair = Ed25519KeyPair::from_pkcs8(private_key)
-                    .map_err(|e| SignatureError::InvalidKeyFormat(format!("Invalid Ed25519 key: {:?}", e)))?;
-                
+                let key_pair = Ed25519KeyPair::from_pkcs8(private_key).map_err(|e| {
+                    SignatureError::InvalidKeyFormat(format!("Invalid Ed25519 key: {:?}", e))
+                })?;
+
                 let signature = key_pair.sign(signature_base.as_bytes());
                 signature.as_ref().to_vec()
-            },
+            }
             SignatureAlgorithm::EcdsaP256Sha256 => {
                 let key_pair = EcdsaKeyPair::from_pkcs8(
                     &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
                     private_key,
                     rng,
-                ).map_err(|e| SignatureError::InvalidKeyFormat(format!("Invalid ECDSA key: {:?}", e)))?;
-                
-                let signature = key_pair.sign(rng, signature_base.as_bytes())
+                )
+                .map_err(|e| {
+                    SignatureError::InvalidKeyFormat(format!("Invalid ECDSA key: {:?}", e))
+                })?;
+
+                let signature = key_pair
+                    .sign(rng, signature_base.as_bytes())
                     .map_err(|e| SignatureError::CryptoError(format!("Signing failed: {:?}", e)))?;
-                
+
                 signature.as_ref().to_vec()
-            },
+            }
             SignatureAlgorithm::RsaSha256 => {
-                let key_pair = RsaKeyPair::from_pkcs8(private_key)
-                    .map_err(|e| SignatureError::InvalidKeyFormat(format!("Invalid RSA key: {:?}", e)))?;
-                
-                let mut signature = vec![0; key_pair.public_modulus_len()];
-                key_pair.sign(
-                    &signature::RSA_PKCS1_SHA256,
-                    rng,
-                    signature_base.as_bytes(),
-                    &mut signature,
-                ).map_err(|e| SignatureError::CryptoError(format!("RSA signing failed: {:?}", e)))?;
-                
+                let key_pair = RsaKeyPair::from_pkcs8(private_key).map_err(|e| {
+                    SignatureError::InvalidKeyFormat(format!("Invalid RSA key: {:?}", e))
+                })?;
+
+                let mut signature = vec![0; key_pair.public().modulus_len()];
+                key_pair
+                    .sign(
+                        &signature::RSA_PKCS1_SHA256,
+                        rng,
+                        signature_base.as_bytes(),
+                        &mut signature,
+                    )
+                    .map_err(|e| {
+                        SignatureError::CryptoError(format!("RSA signing failed: {:?}", e))
+                    })?;
+
                 signature
-            },
+            }
             SignatureAlgorithm::RsaPssSha512 => {
-                let key_pair = RsaKeyPair::from_pkcs8(private_key)
-                    .map_err(|e| SignatureError::InvalidKeyFormat(format!("Invalid RSA key: {:?}", e)))?;
-                
-                let mut signature = vec![0; key_pair.public_modulus_len()];
-                key_pair.sign(
-                    &signature::RSA_PSS_SHA512,
-                    rng,
-                    signature_base.as_bytes(),
-                    &mut signature,
-                ).map_err(|e| SignatureError::CryptoError(format!("RSA-PSS signing failed: {:?}", e)))?;
-                
+                let key_pair = RsaKeyPair::from_pkcs8(private_key).map_err(|e| {
+                    SignatureError::InvalidKeyFormat(format!("Invalid RSA key: {:?}", e))
+                })?;
+
+                let mut signature = vec![0; key_pair.public().modulus_len()];
+                key_pair
+                    .sign(
+                        &signature::RSA_PSS_SHA512,
+                        rng,
+                        signature_base.as_bytes(),
+                        &mut signature,
+                    )
+                    .map_err(|e| {
+                        SignatureError::CryptoError(format!("RSA-PSS signing failed: {:?}", e))
+                    })?;
+
                 signature
-            },
+            }
         };
-        
+
         Ok(BASE64.encode(signature))
     }
 }
@@ -475,53 +841,57 @@ mod tests {
         params.expires = Some(DateTime::from_timestamp(1618884775, 0).unwrap());
         params.key_id = Some("test-key-rsa-pss".to_string());
         params.algorithm = Some(SignatureAlgorithm::RsaPssSha512);
-        
+
         let formatted = params.format_parameters();
         assert!(formatted.contains("created=1618884475"));
         assert!(formatted.contains("expires=1618884775"));
         assert!(formatted.contains("keyid=\"test-key-rsa-pss\""));
         assert!(formatted.contains("alg=\"rsa-pss-sha512\""));
     }
-    
+
     #[test]
     fn test_component_identifier_from_str() {
         assert_eq!(
             ComponentIdentifier::from_str("@method").unwrap(),
             ComponentIdentifier::Method
         );
-        
+
         assert_eq!(
             ComponentIdentifier::from_str("content-type").unwrap(),
             ComponentIdentifier::Header("content-type".to_string())
         );
-        
+
         assert!(ComponentIdentifier::from_str("@invalid").is_err());
     }
-    
+
     #[test]
     fn test_create_signature_base() {
         let client = Client::new();
-        let mut req = client.post("https://example.com/foo?param=value")
+        let req = client
+            .post("https://example.com/foo?param=value")
             .header("host", "example.com")
             .header("content-type", "application/json")
-            .header("digest", "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=")
+            .header(
+                "digest",
+                "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=",
+            )
             .header("content-length", "18")
             .build()
             .unwrap();
-        
+
         let mut params = SignatureParameters::new();
         params.created = Some(DateTime::from_timestamp(1618884475, 0).unwrap());
         params.key_id = Some("test-key-ed25519".to_string());
-        
+
         let components = vec![
             ComponentIdentifier::Method,
             ComponentIdentifier::Path,
             ComponentIdentifier::Header("content-type".to_string()),
             ComponentIdentifier::Header("digest".to_string()),
         ];
-        
+
         let base = HttpSignature::create_signature_base(&req, &components, &params).unwrap();
-        
+
         assert!(base.contains("\"@method\": POST"));
         assert!(base.contains("\"@path\": /foo"));
         assert!(base.contains("\"content-type\": application/json"));
