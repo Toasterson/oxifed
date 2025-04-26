@@ -14,8 +14,7 @@ use reqwest::{
     header::{HeaderName, HeaderValue},
 };
 use ring::signature::{
-    self, EcdsaKeyPair, Ed25519KeyPair, KeyPair, RsaKeyPair, UnparsedPublicKey,
-    VerificationAlgorithm,
+    self, EcdsaKeyPair, Ed25519KeyPair, RsaKeyPair, UnparsedPublicKey,
 };
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -432,14 +431,22 @@ impl Signature {
             return Err(SignatureError::InvalidSignatureFormat);
         }
 
-        let sig_value = &sig_value[1..]; // Remove the prefix
+        let sig_value = &sig_value[1..]; // Remove the ":" prefixing the value
 
         // Parse components and parameters from the input value
         // Components are quoted strings like "content-type" followed by parameters
+        // First, extract everything before the parameters section
+        let components_part = if let Some(params_start) = input_value.find(';') {
+            &input_value[..params_start]
+        } else {
+            input_value // If no parameters, use the whole input
+        };
+
+        // Then find all quoted strings in the components part
         let component_regex = Regex::new(r#""([^"]+)""#).unwrap();
         let mut components = Vec::new();
 
-        for cap in component_regex.captures_iter(input_value) {
+        for cap in component_regex.captures_iter(components_part) {
             let component_name = cap.get(1).unwrap().as_str();
             components.push(ComponentIdentifier::from_str(component_name)?);
         }
@@ -449,12 +456,18 @@ impl Signature {
         }
 
         // Parse parameters (they start after all components with a semicolon)
-        let params_start = input_value
-            .rfind(';')
-            .ok_or(SignatureError::InvalidSignatureFormat)?;
+        let params_str = if let Some(params_start) = input_value.find(';') {
+            &input_value[params_start + 1..]
+        } else {
+            // No parameters found
+            ""
+        };
 
-        let params_str = &input_value[params_start + 1..];
-        let parameters = SignatureParameters::from_input(params_str)?;
+        let parameters = if params_str.is_empty() {
+            SignatureParameters::default() // Use a default if you have one, or handle appropriately
+        } else {
+            SignatureParameters::from_input(params_str)?
+        };
 
         Ok(Self {
             tag: tag.to_string(),
@@ -748,7 +761,7 @@ impl HttpSignature {
     ) -> Result<String, SignatureError> {
         let signature = match algorithm {
             SignatureAlgorithm::Ed25519 => {
-                let key_pair = Ed25519KeyPair::from_pkcs8(private_key).map_err(|e| {
+                let key_pair = Ed25519KeyPair::from_pkcs8_maybe_unchecked(private_key).map_err(|e| {
                     SignatureError::InvalidKeyFormat(format!("Invalid Ed25519 key: {:?}", e))
                 })?;
 
