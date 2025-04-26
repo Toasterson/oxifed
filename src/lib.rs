@@ -13,7 +13,6 @@ use url::Url;
 
 /// Represents types of objects in ActivityPub.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub enum ObjectType {
     // Core types
     Object,
@@ -53,7 +52,6 @@ pub enum ObjectType {
 
 /// Represents types of activities in ActivityPub.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub enum ActivityType {
     // Base activities
     Accept,
@@ -259,6 +257,7 @@ pub struct Collection {
 
     /// The total number of items in the collection
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "totalItems")]
     pub total_items: Option<usize>,
 
     /// The items in the collection
@@ -289,31 +288,41 @@ impl<'de> Deserialize<'de> for ActivityPubEntity {
 
         // Check for the type property
         if let Some(type_value) = value.get("type") {
-            let type_str = type_value.as_str().unwrap_or("");
-
-            // Determine which entity to deserialize based on the type
-            match type_str {
-                "Create" | "Follow" | "Accept" | "Reject" | "Add" | "Remove" | "Like" | "Announce" | "Undo" | "Update" | "Delete" | "Block" | "Offer" | "Invite" => {
-                    let activity: Activity = serde_json::from_value(value.clone())
-                        .map_err(serde::de::Error::custom)?;
-                    Ok(ActivityPubEntity::Activity(activity))
-                },
-                "Collection" | "OrderedCollection" | "CollectionPage" | "OrderedCollectionPage" => {
-                    let collection: Collection = serde_json::from_value(value.clone())
-                        .map_err(serde::de::Error::custom)?;
-                    Ok(ActivityPubEntity::Collection(collection))
-                },
-                "Link" => {
-                    let link: Link = serde_json::from_value(value.clone())
-                        .map_err(serde::de::Error::custom)?;
-                    Ok(ActivityPubEntity::Link(link))
-                },
-                // Default to Object for all other types
-                _ => {
-                    let object: Object = serde_json::from_value(value.clone())
-                        .map_err(serde::de::Error::custom)?;
-                    Ok(ActivityPubEntity::Object(object))
+            if let Some(type_str) = type_value.as_str() {
+                // Determine which entity to deserialize based on the type
+                match type_str {
+                    // Activity types
+                    "Create" | "Follow" | "Accept" | "Reject" | "Add" | "Remove" | 
+                    "Like" | "Announce" | "Undo" | "Update" | "Delete" | "Block" | 
+                    "Offer" | "Invite" => {
+                        let activity: Activity = serde_json::from_value(value.clone())
+                            .map_err(serde::de::Error::custom)?;
+                        Ok(ActivityPubEntity::Activity(activity))
+                    },
+                    // Collection types
+                    "Collection" | "OrderedCollection" | "CollectionPage" | "OrderedCollectionPage" => {
+                        let collection: Collection = serde_json::from_value(value.clone())
+                            .map_err(serde::de::Error::custom)?;
+                        Ok(ActivityPubEntity::Collection(collection))
+                    },
+                    // Link type
+                    "Link" => {
+                        let link: Link = serde_json::from_value(value.clone())
+                            .map_err(serde::de::Error::custom)?;
+                        Ok(ActivityPubEntity::Link(link))
+                    },
+                    // Default to Object for all other types
+                    _ => {
+                        let object: Object = serde_json::from_value(value.clone())
+                            .map_err(serde::de::Error::custom)?;
+                        Ok(ActivityPubEntity::Object(object))
+                    }
                 }
+            } else {
+                // Type value is not a string, default to Object
+                let object: Object = serde_json::from_value(value.clone())
+                    .map_err(serde::de::Error::custom)?;
+                Ok(ActivityPubEntity::Object(object))
             }
         } else {
             // If no type is specified, try to deserialize as an Object
