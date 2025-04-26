@@ -1,0 +1,18 @@
+services:
+  lavinmq:
+    image: cloudamqp/lavinmq:latest
+    container_name: lavinmq
+    ports:
+      # AMQP port
+      - "5672:5672"
+      # Management HTTP interface
+      - "15672:15672"
+    volumes:
+      - lavinmq-data:/var/lib/lavinmq
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
+
+volumes:
+  lavinmq-data:
+    driver: local
