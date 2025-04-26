@@ -7,6 +7,7 @@
 use crate::{Activity, ActivityPubEntity, Collection, Object, ObjectOrLink};
 use reqwest::{header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE}, Client, Response};
 use url::Url;
+use crate::httpsignature::{HttpSignature, SignatureConfig, ComponentIdentifier, SignatureAlgorithm, SignatureError};
 
 /// Standard ActivityPub content type for requests
 pub const ACTIVITYPUB_CONTENT_TYPE: &str = "application/activity+json";
@@ -33,6 +34,9 @@ pub enum ClientError {
 
     #[error("Invalid header value: {0}")]
     InvalidHeader(#[from] reqwest::header::InvalidHeaderValue),
+    
+    #[error("Signature error: {0}")]
+    SignatureError(#[from] SignatureError),
 }
 
 /// Result type for ActivityPub client operations
@@ -43,8 +47,8 @@ pub type Result<T> = std::result::Result<T, ClientError>;
 pub struct ClientConfig {
     /// User agent to use for requests
     pub user_agent: String,
-    /// Optional HTTP signature key for signed requests
-    pub http_signature_key: Option<String>,
+    /// Optional HTTP signature configuration for signed requests
+    pub http_signature_config: Option<SignatureConfig>,
     /// Optional OAuth credentials
     pub oauth_token: Option<String>,
 }
@@ -53,7 +57,7 @@ impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             user_agent: format!("ActivityPub-RS/0.1.0"),
-            http_signature_key: None,
+            http_signature_config: None,
             oauth_token: None,
         }
     }
@@ -94,19 +98,30 @@ impl ActivityPubClient {
             );
         }
         
-        // HTTP signatures would be added here in a real implementation
+        Ok(headers)
+    }
+
+    /// Sign a request using HTTP Signatures if configured
+    fn sign_request(&self, request: &mut reqwest::Request) -> Result<()> {
+        if let Some(config) = &self.config.http_signature_config {
+            // Sign the request directly using the updated HttpSignature
+            HttpSignature::sign_request(request, config)?;
+        }
         
-       Ok(headers)
+        Ok(())
     }
 
     /// Fetch an ActivityPub object from a URL
     pub async fn fetch_object(&self, url: &Url) -> Result<ActivityPubEntity> {
-        let response = self.client
+        let mut request = self.client
             .get(url.clone())
             .headers(self.default_headers()?)
-            .send()
-            .await?;
+            .build()?;
         
+        // Sign the request if configured
+        self.sign_request(&mut request)?;
+        
+        let response = self.client.execute(request).await?;
         self.handle_response(response).await
     }
 
@@ -154,13 +169,17 @@ impl ActivityPubClient {
 
     /// Send an activity to an actor's inbox
     pub async fn send_to_inbox(&self, inbox_url: &Url, activity: &Activity) -> Result<()> {
-        let response = self.client
+        let mut request = self.client
             .post(inbox_url.clone())
             .headers(self.default_headers()?)
             .header(CONTENT_TYPE, ACTIVITYPUB_CONTENT_TYPE)
             .json(activity)
-            .send()
-            .await?;
+            .build()?;
+        
+        // Sign the request if configured
+        self.sign_request(&mut request)?;
+        
+        let response = self.client.execute(request).await?;
         
         if response.status().is_success() {
             Ok(())
@@ -171,13 +190,17 @@ impl ActivityPubClient {
 
     /// Post an activity to the actor's outbox
     pub async fn post_to_outbox(&self, outbox_url: &Url, activity: &Activity) -> Result<Activity> {
-        let response = self.client
+        let mut request = self.client
             .post(outbox_url.clone())
             .headers(self.default_headers()?)
             .header(CONTENT_TYPE, ACTIVITYPUB_CONTENT_TYPE)
             .json(activity)
-            .send()
-            .await?;
+            .build()?;
+        
+        // Sign the request if configured
+        self.sign_request(&mut request)?;
+        
+        let response = self.client.execute(request).await?;
         
         if !response.status().is_success() {
             return Err(ClientError::StatusError(response.status()));
@@ -326,5 +349,34 @@ mod tests {
         assert_eq!(result.activity_type, crate::ActivityType::Create);
         assert_eq!(result.id, Some(Url::parse("https://example.com/activities/123").unwrap()));
         m.assert_async().await;
+    }
+    
+    #[tokio::test]
+    async fn test_with_http_signature() {
+        // This test would require actual keys, so we'll just demonstrate the setup
+        let ed25519_key = b"dummy_key_for_demonstration_only";
+        
+        let signature_config = SignatureConfig {
+            algorithm: SignatureAlgorithm::Ed25519,
+            parameters: crate::httpsignature::SignatureParameters::new(),
+            key_id: "https://example.com/keys/1".to_string(),
+            components: vec![
+                ComponentIdentifier::Method,
+                ComponentIdentifier::Path,
+                ComponentIdentifier::Header("host".to_string()),
+                ComponentIdentifier::Header("date".to_string()),
+                ComponentIdentifier::Header("content-type".to_string()),
+            ],
+            private_key: ed25519_key.to_vec(),
+        };
+        
+        let client_config = ClientConfig {
+            user_agent: "ActivityPub-Client/1.0".to_string(),
+            http_signature_config: Some(signature_config),
+            oauth_token: None,
+        };
+        
+        // In a real scenario, this client would sign requests with the configured key
+        let _client = ActivityPubClient::with_config(client_config).unwrap();
     }
 }
