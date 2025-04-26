@@ -171,45 +171,72 @@ pub enum ObjectOrLink {
     Url(Url),
 }
 
+impl ObjectOrLink {
+    /// Returns true if this is an Object variant
+    pub fn is_object(&self) -> bool {
+        matches!(self, ObjectOrLink::Object(_))
+    }
+
+    /// Returns true if this is a Link variant
+    pub fn is_link(&self) -> bool {
+        matches!(self, ObjectOrLink::Link(_))
+    }
+
+    /// Returns true if this is a URL variant
+    pub fn is_url(&self) -> bool {
+        matches!(self, ObjectOrLink::Url(_))
+    }
+
+    /// Attempts to get the underlying URL, whether from a URL variant or from
+    /// an Object or Link's ID or URL property
+    pub fn get_url(&self) -> Option<&Url> {
+        match self {
+            ObjectOrLink::Object(obj) => obj.id.as_ref().or_else(|| obj.url.as_ref()),
+            ObjectOrLink::Link(link) => link.href.as_ref(),
+            ObjectOrLink::Url(url) => Some(url),
+        }
+    }
+}
+
 /// Represents an Activity in ActivityPub.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Activity {
     /// The type of the activity
     #[serde(rename = "type")]
     pub activity_type: ActivityType,
-    
+
     /// The identifier for this activity
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<Url>,
-    
+
     /// A simple, human-readable, plain-text name for the activity
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    
+
     /// A natural language summarization of the activity
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
-    
+
     /// The actor or person performing the activity
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor: Option<ObjectOrLink>,
-    
+
     /// The primary object of the activity
     #[serde(skip_serializing_if = "Option::is_none")]
     pub object: Option<ObjectOrLink>,
-    
+
     /// The target of the activity
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<ObjectOrLink>,
-    
+
     /// When the activity was published
     #[serde(skip_serializing_if = "Option::is_none")]
     pub published: Option<DateTime<Utc>>,
-    
+
     /// When the activity was updated
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated: Option<DateTime<Utc>>,
-    
+
     /// Additional properties not defined in the specification
     #[serde(flatten)]
     pub additional_properties: HashMap<String, Value>,
@@ -221,23 +248,23 @@ pub struct Collection {
     /// The type of the collection
     #[serde(rename = "type")]
     pub collection_type: ObjectType,
-    
+
     /// The identifier for this collection
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<Url>,
-    
+
     /// A simple, human-readable, plain-text name for the collection
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    
+
     /// The total number of items in the collection
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_items: Option<usize>,
-    
+
     /// The items in the collection
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<ObjectOrLink>,
-    
+
     /// Additional properties not defined in the specification
     #[serde(flatten)]
     pub additional_properties: HashMap<String, Value>,
@@ -259,11 +286,11 @@ impl<'de> Deserialize<'de> for ActivityPubEntity {
         D: Deserializer<'de>,
     {
         let value = Value::deserialize(deserializer)?;
-        
+
         // Check for the type property
         if let Some(type_value) = value.get("type") {
             let type_str = type_value.as_str().unwrap_or("");
-            
+
             // Determine which entity to deserialize based on the type
             match type_str {
                 "Create" | "Follow" | "Accept" | "Reject" | "Add" | "Remove" | "Like" | "Announce" | "Undo" | "Update" | "Delete" | "Block" | "Offer" | "Invite" => {
@@ -305,7 +332,7 @@ pub fn parse_activitypub_json(json: &str) -> Result<ActivityPubEntity, serde_jso
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_parse_activity() {
         let json = r#"
@@ -322,20 +349,22 @@ mod tests {
             }
         }
         "#;
-        
+
         let result = parse_activitypub_json(json).unwrap();
-        
+
         if let ActivityPubEntity::Activity(activity) = result {
             assert_eq!(activity.activity_type, ActivityType::Create);
             assert_eq!(activity.id, Some(Url::parse("https://example.com/activities/1").unwrap()));
-            
-            if let Some(ObjectOrLink::Url(actor_url)) = activity.actor {
-                assert_eq!(actor_url, Url::parse("https://example.com/users/alice").unwrap());
+
+            // Check actor field - should be a URL string in this case
+            if let Some(ObjectOrLink::Url(actor_url)) = &activity.actor {
+                assert_eq!(actor_url.as_str(), "https://example.com/users/alice");
             } else {
                 panic!("Actor should be a URL");
             }
-            
-            if let Some(ObjectOrLink::Object(object)) = activity.object {
+
+            // Check object field - should be an Object
+            if let Some(ObjectOrLink::Object(object)) = &activity.object {
                 assert_eq!(object.object_type, ObjectType::Note);
                 assert_eq!(object.id, Some(Url::parse("https://example.com/notes/1").unwrap()));
                 assert_eq!(object.content, Some("Hello, world!".to_string()));
@@ -346,7 +375,7 @@ mod tests {
             panic!("Should be an Activity");
         }
     }
-    
+
     #[test]
     fn test_parse_object_with_additional_properties() {
         let json = r#"
@@ -361,20 +390,20 @@ mod tests {
             "followers": "https://example.com/users/bob/followers"
         }
         "#;
-        
+
         let result = parse_activitypub_json(json).unwrap();
-        
+
         if let ActivityPubEntity::Object(object) = result {
             assert_eq!(object.object_type, ObjectType::Person);
             assert_eq!(object.id, Some(Url::parse("https://example.com/users/bob").unwrap()));
             assert_eq!(object.name, Some("Bob".to_string()));
-            
+
             // Check additional properties
             assert!(object.additional_properties.contains_key("preferredUsername"));
             assert!(object.additional_properties.contains_key("inbox"));
             assert!(object.additional_properties.contains_key("outbox"));
             assert!(object.additional_properties.contains_key("followers"));
-            
+
             if let Some(Value::String(username)) = object.additional_properties.get("preferredUsername") {
                 assert_eq!(username, "bob123");
             } else {
@@ -382,6 +411,55 @@ mod tests {
             }
         } else {
             panic!("Should be an Object");
+        }
+    }
+
+    #[test]
+    fn test_parse_collection() {
+        let json = r#"
+        {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "type": "Collection",
+            "id": "https://example.com/collections/public",
+            "totalItems": 2,
+            "items": [
+                {
+                    "type": "Note",
+                    "id": "https://example.com/notes/1",
+                    "content": "First note"
+                },
+                "https://example.com/notes/2"
+            ]
+        }
+        "#;
+
+        let result = parse_activitypub_json(json).unwrap();
+
+        if let ActivityPubEntity::Collection(collection) = result {
+            assert_eq!(collection.collection_type, ObjectType::Collection);
+            assert_eq!(collection.id, Some(Url::parse("https://example.com/collections/public").unwrap()));
+            assert_eq!(collection.total_items, Some(2));
+            assert_eq!(collection.items.len(), 2);
+
+            // Check first item - should be an Object (Note)
+            match &collection.items[0] {
+                ObjectOrLink::Object(object) => {
+                    assert_eq!(object.object_type, ObjectType::Note);
+                    assert_eq!(object.id, Some(Url::parse("https://example.com/notes/1").unwrap()));
+                    assert_eq!(object.content, Some("First note".to_string()));
+                },
+                _ => panic!("First item should be an Object"),
+            }
+
+            // Check second item - should be a URL
+            match &collection.items[1] {
+                ObjectOrLink::Url(url) => {
+                    assert_eq!(url.as_str(), "https://example.com/notes/2");
+                },
+                _ => panic!("Second item should be a URL"),
+            }
+        } else {
+            panic!("Should be a Collection");
         }
     }
 }
