@@ -265,6 +265,7 @@ name = "domainservd"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "oxifed",
  "serde",
  "serde_json",
  "thiserror",

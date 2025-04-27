@@ -11,9 +11,10 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use oxifed::webfinger::JrdResource;
+use serde::Deserialize;
 use std::fs;
+use std::path::PathBuf;
 use thiserror::Error;
 
 /// WebFinger request parameters as defined in RFC 7033
@@ -55,53 +56,11 @@ impl IntoResponse for WebfingerError {
     }
 }
 
-/// WebFinger Resource Descriptor as defined in RFC 7033 Section 4.4
-#[derive(Debug, Serialize, Deserialize)]
-pub struct JRD {
-    /// Subject URI identifying the entity that the JRD describes
-    pub subject: String,
-    
-    /// List of aliases for the subject
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub aliases: Option<Vec<String>>,
-    
-    /// List of properties associated with the JRD
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub properties: Option<serde_json::Map<String, serde_json::Value>>,
-    
-    /// List of links associated with the JRD
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub links: Option<Vec<Link>>,
-}
-
-/// Link structure as defined in RFC 7033 Section 4.4.4
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Link {
-    /// The relation type of the link
-    pub rel: String,
-    
-    /// The link type
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<String>,
-    
-    /// The HTTP reference of the link
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub href: Option<String>,
-    
-    /// List of link template URIs
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub titles: Option<serde_json::Map<String, serde_json::Value>>,
-    
-    /// List of properties associated with the link
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub properties: Option<serde_json::Map<String, serde_json::Value>>,
-}
-
 /// Handles webfinger requests and serves responses from disk
 async fn handle_webfinger(
     Query(query): Query<WebfingerQuery>,
     State(webfinger_dir): State<PathBuf>,
-) -> Result<Json<JRD>, WebfingerError> {
+) -> Result<Json<JrdResource>, WebfingerError> {
     // Validate the resource format
     if !query.resource.starts_with("acct:") && !query.resource.starts_with("https://") {
         return Err(WebfingerError::InvalidResource(format!(
@@ -135,7 +94,7 @@ async fn handle_webfinger(
     
     // Read and parse the JSON file
     let file_content = fs::read_to_string(file_path)?;
-    let mut jrd: JRD = serde_json::from_str(&file_content)?;
+    let mut jrd: JrdResource = serde_json::from_str(&file_content)?;
     
     // Filter relations if requested
     if let Some(relations) = &query.relations {
