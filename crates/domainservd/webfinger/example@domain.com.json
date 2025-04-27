@@ -1,0 +1,26 @@
+{
+  "subject": "acct:example@domain.com",
+  "aliases": [
+    "https://domain.com/@example",
+    "https://domain.com/users/example"
+  ],
+  "properties": {
+    "http://example.org/ns/role": "administrator"
+  },
+  "links": [
+    {
+      "rel": "http://webfinger.net/rel/profile-page",
+      "type": "text/html",
+      "href": "https://domain.com/@example"
+    },
+    {
+      "rel": "self",
+      "type": "application/activity+json",
+      "href": "https://domain.com/users/example"
+    },
+    {
+      "rel": "http://ostatus.org/schema/1.0/subscribe",
+      "template": "https://domain.com/authorize_interaction?uri={uri}"
+    }
+  ]
+}
