@@ -14,3 +14,4 @@ tracing-subscriber = "0.3"
 thiserror.workspace = true
 url.workspace = true
 oxifed = { path = "../.." }
+miette = {workspace = true, features = ["fancy"] }
