@@ -1,11 +1,11 @@
 //! HTTP client for ActivityPub protocol.
 //!
-//! This module provides functionality for interacting with ActivityPub servers
+//! This module provides functionality for interacting with ActivityPub servers, 
 //! including fetching objects, collections, actors, and submitting activities to outboxes.
 //! Implementation follows the W3C ActivityPub specification at https://www.w3.org/TR/activitypub/
 
 use crate::httpsignature::{
-    ComponentIdentifier, HttpSignature, SignatureAlgorithm, SignatureConfig, SignatureError,
+    HttpSignature, SignatureConfig, SignatureError,
 };
 use crate::{Activity, ActivityPubEntity, Collection, Object, ObjectOrLink};
 use reqwest::{
@@ -62,7 +62,7 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            user_agent: format!("ActivityPub-RS/0.1.0"),
+            user_agent: String::from("ActivityPub-RS/0.1.0"),
             http_signature_config: None,
             oauth_token: None,
         }
@@ -77,7 +77,7 @@ pub struct ActivityPubClient {
 }
 
 impl ActivityPubClient {
-    /// Create a new ActivityPub client with default configuration
+    /// Create a new ActivityPub client with the default configuration
     pub fn new() -> Result<Self> {
         Self::with_config(ClientConfig::default())
     }
@@ -94,11 +94,11 @@ impl ActivityPubClient {
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, HeaderValue::from_static(ACTIVITYPUB_CONTENT_TYPE));
 
-        // Add OAuth token if configured
+        // Add an OAuth token if configured
         if let Some(token) = &self.config.oauth_token {
             headers.insert(
                 reqwest::header::AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {}", token))?,
+                HeaderValue::from_str(format!("Bearer {}", token).as_str())?,
             );
         }
 
@@ -136,7 +136,7 @@ impl ActivityPubClient {
 
         match entity {
             ActivityPubEntity::Object(object) => Ok(object),
-            _ => Err(ClientError::MissingField(format!(
+            _ => Err(ClientError::MissingField(String::from(
                 "Expected actor object, but got a different entity type"
             ))),
         }
@@ -148,7 +148,7 @@ impl ActivityPubClient {
 
         match entity {
             ActivityPubEntity::Collection(collection) => Ok(collection),
-            _ => Err(ClientError::MissingField(format!(
+            _ => Err(ClientError::MissingField(String::from(
                 "Expected collection, but got a different entity type"
             ))),
         }
@@ -274,6 +274,9 @@ impl ActivityPubClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::httpsignature::{
+        SignatureAlgorithm, ComponentIdentifier,
+    };
 
     #[tokio::test]
     async fn test_fetch_actor() {

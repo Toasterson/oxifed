@@ -6,7 +6,7 @@
 mod webfinger;
 
 use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
-use std::path::PathBuf;
+use std::path::{absolute, PathBuf};
 
 async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "OK")
@@ -19,7 +19,7 @@ async fn main() {
 
     let webfinger_dir =
         std::env::var("WEBFINGER_DIR").unwrap_or_else(|_| "./webfinger".to_string());
-    let webfinger_path = PathBuf::from(webfinger_dir);
+    let webfinger_path = absolute(PathBuf::from(webfinger_dir)).unwrap();
 
     // Ensure the webfinger directory exists
     if !webfinger_path.exists() {
@@ -29,7 +29,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health_check))
-        .nest("/", webfinger::webfinger_router(webfinger_path));
+        .merge(webfinger::webfinger_router(webfinger_path));
 
     let addr = "0.0.0.0:3000";
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();

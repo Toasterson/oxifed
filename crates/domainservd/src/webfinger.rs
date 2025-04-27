@@ -16,6 +16,7 @@ use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
+use tracing::debug;
 
 /// WebFinger request parameters as defined in RFC 7033
 #[derive(Debug, Deserialize)]
@@ -62,7 +63,8 @@ async fn handle_webfinger(
     State(webfinger_dir): State<PathBuf>,
 ) -> Result<Json<JrdResource>, WebfingerError> {
     // Validate the resource format
-    if !query.resource.starts_with("acct:") && !query.resource.starts_with("https://") {
+    if !query.resource.starts_with("acct:") && !query.resource.starts_with("act:") && !query.resource.starts_with("https://") {
+        debug!("Tried to fetch webfinger resource with invalid format: {}", query.resource);
         return Err(WebfingerError::InvalidResource(format!(
             "Resource must start with 'acct:' or 'https://': {}",
             query.resource
@@ -73,6 +75,8 @@ async fn handle_webfinger(
     // For acct:user@example.com or https://example.com/user, we want "user@example.com" or "user"
     let identifier = if query.resource.starts_with("acct:") {
         query.resource.strip_prefix("acct:").map(|s| s.to_string()).unwrap()
+    } else if query.resource.starts_with("act:") {
+        query.resource.strip_prefix("act:").map(|s| s.to_string()).unwrap()
     } else {
         // For https URLs, extract the last path component
         let url = url::Url::parse(&query.resource)
@@ -89,6 +93,7 @@ async fn handle_webfinger(
     
     // Check if the file exists
     if !file_path.exists() {
+        debug!("Tried to fetch non-existent webfinger file: {}", file_path.display());
         return Err(WebfingerError::ResourceNotFound(query.resource));
     }
     
