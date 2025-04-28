@@ -13,6 +13,21 @@ services:
       - TZ=UTC
     restart: unless-stopped
 
+  mongodb:
+    image: mongo:8
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    environment:
+      - TZ=UTC
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    restart: unless-stopped
+
 volumes:
   lavinmq-data:
+    driver: local
+  mongodb-data:
     driver: local
