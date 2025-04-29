@@ -3,6 +3,7 @@ use mongodb::{
     options::{ClientOptions},
     Client, Collection, Database,
 };
+use oxifed::webfinger::JrdResource;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -114,7 +115,7 @@ impl MongoDB {
     }
 
     /// Get profiles collection
-    pub fn profiles_collection(&self) -> Collection<Profile> {
+    pub fn profiles_collection(&self) -> Collection<JrdResource> {
         self.db.collection("profiles")
     }
 }

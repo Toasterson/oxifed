@@ -11,12 +11,14 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use mongodb::bson::doc;
 use oxifed::webfinger::JrdResource;
 use serde::Deserialize;
-use std::fs;
-use std::path::PathBuf;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::debug;
+
+use crate::db::MongoDB;
 
 /// WebFinger request parameters as defined in RFC 7033
 #[derive(Debug, Deserialize)]
@@ -38,8 +40,8 @@ pub enum WebfingerError {
     #[error("Invalid resource format: {0}")]
     InvalidResource(String),
     
-    #[error("File system error: {0}")]
-    FileSystemError(#[from] std::io::Error),
+    #[error("Database error: {0}")]
+    DbError(#[from] mongodb::error::Error),
     
     #[error("JSON parsing error: {0}")]
     JsonError(#[from] serde_json::Error),
@@ -57,10 +59,10 @@ impl IntoResponse for WebfingerError {
     }
 }
 
-/// Handles webfinger requests and serves responses from disk
+/// Handles webfinger requests and serves responses from MongoDB
 async fn handle_webfinger(
     Query(query): Query<WebfingerQuery>,
-    State(webfinger_dir): State<PathBuf>,
+    State(db): State<Arc<MongoDB>>,
 ) -> Result<Json<JrdResource>, WebfingerError> {
     // Validate the resource format
     if !query.resource.starts_with("acct:") && !query.resource.starts_with("act:") && !query.resource.starts_with("https://") {
@@ -71,35 +73,21 @@ async fn handle_webfinger(
         )));
     }
     
-    // Extract identifier from the resource URI
-    // For acct:user@example.com or https://example.com/user, we want "user@example.com" or "user"
-    let identifier = if query.resource.starts_with("acct:") {
-        query.resource.strip_prefix("acct:").map(|s| s.to_string()).unwrap()
-    } else if query.resource.starts_with("act:") {
-        query.resource.strip_prefix("act:").map(|s| s.to_string()).unwrap()
-    } else {
-        // For https URLs, extract the last path component
-        let url = url::Url::parse(&query.resource)
-            .map_err(|_| WebfingerError::InvalidResource(query.resource.clone()))?;
-        
-        url.path_segments()
-            .and_then(|segments| segments.last())
-            .map(|segment| segment.to_string())
-            .ok_or_else(|| WebfingerError::InvalidResource(query.resource.clone()))?
-    };
+    // Use the full resource as the subject for lookup
+    let subject = query.resource.clone();
     
-    // Construct the file path for the webfinger JSON
-    let file_path = webfinger_dir.join(format!("{}.json", identifier));
+    // Query MongoDB for the JrdResource
+    let profiles_collection = db.profiles_collection();
+    let filter = doc! { "subject": subject.clone() };
     
-    // Check if the file exists
-    if !file_path.exists() {
-        debug!("Tried to fetch non-existent webfinger file: {}", file_path.display());
-        return Err(WebfingerError::ResourceNotFound(query.resource));
-    }
+    // Attempt to find the resource in MongoDB
+    let jrd_result = profiles_collection.find_one(filter).await?;
     
-    // Read and parse the JSON file
-    let file_content = fs::read_to_string(file_path)?;
-    let mut jrd: JrdResource = serde_json::from_str(&file_content)?;
+    // Return 404 if not found
+    let mut jrd = jrd_result.ok_or_else(|| {
+        debug!("Webfinger resource not found in database: {}", subject);
+        WebfingerError::ResourceNotFound(subject)
+    })?;
     
     // Filter relations if requested
     if let Some(relations) = &query.relations {
@@ -118,13 +106,11 @@ async fn handle_webfinger(
 }
 
 /// Creates a router for webfinger endpoints
-pub fn webfinger_router(webfinger_dir: impl Into<PathBuf>) -> Router {
-    let webfinger_path = webfinger_dir.into();
-    
+pub fn webfinger_router(db: Arc<MongoDB>) -> Router {
     Router::new()
         .route(
             "/.well-known/webfinger",
             get(handle_webfinger)
         )
-        .with_state(webfinger_path)
+        .with_state(db)
 }

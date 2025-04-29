@@ -7,7 +7,8 @@ mod webfinger;
 mod db;
 
 use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
-use std::path::{absolute, PathBuf};
+use std::path::absolute;
+use std::sync::Arc;
 use thiserror::Error;
 use std::io;
 use db::MongoDB;
@@ -41,20 +42,9 @@ async fn main() -> Result<(), DomainservdError> {
     // Configure logging
     tracing_subscriber::fmt::init();
 
-    // Setup WebFinger directory
-    let webfinger_dir =
-        std::env::var("WEBFINGER_DIR").unwrap_or_else(|_| "./webfinger".to_string());
-    let webfinger_path = absolute(PathBuf::from(webfinger_dir))?;
-
-    // Ensure the webfinger directory exists
-    if !webfinger_path.exists() {
-        std::fs::create_dir_all(&webfinger_path)?;
-        tracing::info!("Created webfinger directory: {:?}", webfinger_path);
-    }
-    
     // Initialize MongoDB connection
     let mongo_uri = std::env::var("MONGODB_URI")
-        .unwrap_or_else(|_| "mongodb://localhost:27017".to_string());
+        .unwrap_or_else(|_| "mongodb://root:password@localhost:27017".to_string());
     let db_name = std::env::var("MONGODB_DBNAME")
         .unwrap_or_else(|_| "domainservd".to_string());
     
@@ -64,10 +54,13 @@ async fn main() -> Result<(), DomainservdError> {
     // Initialize collections
     mongodb.init_collections().await?;
     tracing::info!("MongoDB initialized successfully");
-
+    
+    // Share MongoDB connection across handlers
+    let db = std::sync::Arc::new(mongodb);
+    
     let app = Router::new()
         .route("/health", get(health_check))
-        .merge(webfinger::webfinger_router(webfinger_path));
+        .merge(webfinger::webfinger_router(db));
 
     let addr = "0.0.0.0:3000";
     let listener = tokio::net::TcpListener::bind(addr).await?;
