@@ -1,12 +1,10 @@
 //! HTTP client for ActivityPub protocol.
 //!
-//! This module provides functionality for interacting with ActivityPub servers, 
+//! This module provides functionality for interacting with ActivityPub servers,
 //! including fetching objects, collections, actors, and submitting activities to outboxes.
 //! Implementation follows the W3C ActivityPub specification at https://www.w3.org/TR/activitypub/
 
-use crate::httpsignature::{
-    HttpSignature, SignatureConfig, SignatureError,
-};
+use crate::httpsignature::{HttpSignature, SignatureConfig, SignatureError};
 use crate::{Activity, ActivityPubEntity, Collection, Object, ObjectOrLink};
 use reqwest::{
     Client, Response,
@@ -137,7 +135,7 @@ impl ActivityPubClient {
         match entity {
             ActivityPubEntity::Object(object) => Ok(object),
             _ => Err(ClientError::MissingField(String::from(
-                "Expected actor object, but got a different entity type"
+                "Expected actor object, but got a different entity type",
             ))),
         }
     }
@@ -149,7 +147,7 @@ impl ActivityPubClient {
         match entity {
             ActivityPubEntity::Collection(collection) => Ok(collection),
             _ => Err(ClientError::MissingField(String::from(
-                "Expected collection, but got a different entity type"
+                "Expected collection, but got a different entity type",
             ))),
         }
     }
@@ -274,9 +272,7 @@ impl ActivityPubClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::httpsignature::{
-        SignatureAlgorithm, ComponentIdentifier,
-    };
+    use crate::httpsignature::{ComponentIdentifier, SignatureAlgorithm};
 
     #[tokio::test]
     async fn test_fetch_actor() {

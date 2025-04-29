@@ -5,11 +5,11 @@
 //! It provides functionality to serve webfinger resources from disk in JSON format.
 
 use axum::{
+    Json, Router,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
 };
 use mongodb::bson::doc;
 use oxifed::webfinger::JrdResource;
@@ -24,7 +24,7 @@ use crate::AppState;
 pub struct WebfingerQuery {
     /// The resource to query for (e.g. acct:user@example.com)
     pub resource: String,
-    
+
     /// Optional requested relation types to filter the response
     #[serde(rename = "rel")]
     pub relations: Option<Vec<String>>,
@@ -35,13 +35,13 @@ pub struct WebfingerQuery {
 pub enum WebfingerError {
     #[error("Resource not found: {0}")]
     ResourceNotFound(String),
-    
+
     #[error("Invalid resource format: {0}")]
     InvalidResource(String),
-    
+
     #[error("Database error: {0}")]
     DbError(#[from] mongodb::error::Error),
-    
+
     #[error("JSON parsing error: {0}")]
     JsonError(#[from] serde_json::Error),
 }
@@ -53,7 +53,7 @@ impl IntoResponse for WebfingerError {
             WebfingerError::InvalidResource(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             _ => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
-        
+
         (status, message).into_response()
     }
 }
@@ -64,30 +64,40 @@ async fn handle_webfinger(
     State(state): State<AppState>,
 ) -> Result<Json<JrdResource>, WebfingerError> {
     // Validate the resource format
-    if !query.resource.starts_with("acct:") && !query.resource.starts_with("act:") && !query.resource.starts_with("https://") {
-        debug!("Tried to fetch webfinger resource with invalid format: {}", query.resource);
+    if !query.resource.starts_with("acct:")
+        && !query.resource.starts_with("act:")
+        && !query.resource.starts_with("https://")
+    {
+        debug!(
+            "Tried to fetch webfinger resource with invalid format: {}",
+            query.resource
+        );
         return Err(WebfingerError::InvalidResource(format!(
             "Resource must start with 'acct:' or 'https://': {}",
             query.resource
         )));
     }
-    
+
     // Use the full resource as the subject for lookup
-    let subject = query.resource.clone();
-    
+    let subject = query
+        .resource
+        .replace("act:", "")
+        .replace("acct:", "")
+        .clone();
+
     // Query MongoDB for the JrdResource
     let profiles_collection = state.db.profiles_collection();
     let filter = doc! { "subject": subject.clone() };
     
     // Attempt to find the resource in MongoDB
     let jrd_result = profiles_collection.find_one(filter).await?;
-    
+
     // Return 404 if not found
     let mut jrd = jrd_result.ok_or_else(|| {
         debug!("Webfinger resource not found in database: {}", subject);
         WebfingerError::ResourceNotFound(subject)
     })?;
-    
+
     // Filter relations if requested
     if let Some(relations) = &query.relations {
         if let Some(links) = &mut jrd.links {
@@ -100,7 +110,7 @@ async fn handle_webfinger(
             );
         }
     }
-    
+
     Ok(Json(jrd))
 }
 

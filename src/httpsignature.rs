@@ -13,9 +13,7 @@ use reqwest::{
     Request,
     header::{HeaderName, HeaderValue},
 };
-use ring::signature::{
-    self, EcdsaKeyPair, Ed25519KeyPair, RsaKeyPair, UnparsedPublicKey,
-};
+use ring::signature::{self, EcdsaKeyPair, Ed25519KeyPair, RsaKeyPair, UnparsedPublicKey};
 use std::collections::HashSet;
 use std::str::FromStr;
 use thiserror::Error;
@@ -761,9 +759,10 @@ impl HttpSignature {
     ) -> Result<String, SignatureError> {
         let signature = match algorithm {
             SignatureAlgorithm::Ed25519 => {
-                let key_pair = Ed25519KeyPair::from_pkcs8_maybe_unchecked(private_key).map_err(|e| {
-                    SignatureError::InvalidKeyFormat(format!("Invalid Ed25519 key: {:?}", e))
-                })?;
+                let key_pair =
+                    Ed25519KeyPair::from_pkcs8_maybe_unchecked(private_key).map_err(|e| {
+                        SignatureError::InvalidKeyFormat(format!("Invalid Ed25519 key: {:?}", e))
+                    })?;
 
                 let signature = key_pair.sign(signature_base.as_bytes());
                 signature.as_ref().to_vec()

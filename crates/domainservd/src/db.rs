@@ -1,8 +1,4 @@
-use mongodb::{
-    bson::{doc},
-    options::{ClientOptions},
-    Client, Collection, Database,
-};
+use mongodb::{Client, Collection, Database, bson::doc, options::ClientOptions};
 use oxifed::webfinger::JrdResource;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -75,32 +71,32 @@ impl MongoDB {
         let client_options = ClientOptions::parse(connection_string).await?;
         let client = Client::with_options(client_options)?;
         let db = client.database(db_name);
-        
+
         Ok(Self { client, db })
     }
 
     /// Initialize collections
     pub async fn init_collections(&self) -> Result<(), DbError> {
         tracing::info!("Initializing MongoDB collections");
-        
+
         // Check if collections exist, create them if they don't
         let collection_names = self.db.list_collection_names().await?;
-        
+
         if !collection_names.contains(&"domains".to_string()) {
             tracing::info!("Creating 'domains' collection");
             self.db.create_collection("domains").await?;
         }
-        
+
         if !collection_names.contains(&"actors".to_string()) {
             tracing::info!("Creating 'actors' collection");
             self.db.create_collection("actors").await?;
         }
-        
+
         if !collection_names.contains(&"profiles".to_string()) {
             tracing::info!("Creating 'profiles' collection");
             self.db.create_collection("profiles").await?;
         }
-        
+
         tracing::info!("MongoDB collections initialized successfully");
         Ok(())
     }
