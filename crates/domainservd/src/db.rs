@@ -64,6 +64,7 @@ pub struct Profile {
 
 /// MongoDB connection manager
 pub struct MongoDB {
+    #[allow(dead_code)]
     client: Client,
     db: Database,
 }

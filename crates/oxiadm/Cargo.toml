@@ -1,0 +1,16 @@
+[package]
+name = "oxiadm"
+version.workspace = true
+edition.workspace = true
+description = "Admin CLI tool for Oxifed"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+serde_json = { workspace = true }
+miette = { workspace = true, features = ["fancy"] }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+oxifed = { path = "../.." }
+mongodb = "3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+lapin = { workspace = true }

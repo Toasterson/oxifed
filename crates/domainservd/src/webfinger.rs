@@ -14,11 +14,10 @@ use axum::{
 use mongodb::bson::doc;
 use oxifed::webfinger::JrdResource;
 use serde::Deserialize;
-use std::sync::Arc;
 use thiserror::Error;
 use tracing::debug;
 
-use crate::db::MongoDB;
+use crate::AppState;
 
 /// WebFinger request parameters as defined in RFC 7033
 #[derive(Debug, Deserialize)]
@@ -62,7 +61,7 @@ impl IntoResponse for WebfingerError {
 /// Handles webfinger requests and serves responses from MongoDB
 async fn handle_webfinger(
     Query(query): Query<WebfingerQuery>,
-    State(db): State<Arc<MongoDB>>,
+    State(state): State<AppState>,
 ) -> Result<Json<JrdResource>, WebfingerError> {
     // Validate the resource format
     if !query.resource.starts_with("acct:") && !query.resource.starts_with("act:") && !query.resource.starts_with("https://") {
@@ -77,7 +76,7 @@ async fn handle_webfinger(
     let subject = query.resource.clone();
     
     // Query MongoDB for the JrdResource
-    let profiles_collection = db.profiles_collection();
+    let profiles_collection = state.db.profiles_collection();
     let filter = doc! { "subject": subject.clone() };
     
     // Attempt to find the resource in MongoDB
@@ -106,11 +105,10 @@ async fn handle_webfinger(
 }
 
 /// Creates a router for webfinger endpoints
-pub fn webfinger_router(db: Arc<MongoDB>) -> Router {
+pub fn webfinger_router(_state: AppState) -> Router<AppState> {
     Router::new()
         .route(
             "/.well-known/webfinger",
             get(handle_webfinger)
         )
-        .with_state(db)
 }

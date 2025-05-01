@@ -13,6 +13,7 @@ use url::Url;
 pub mod client;
 pub mod httpsignature;
 pub mod webfinger;
+pub mod messaging;
 
 /// Represents types of objects in ActivityPub.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
