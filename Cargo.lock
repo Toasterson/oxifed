@@ -2267,7 +2267,6 @@ dependencies = [
  "clap",
  "lapin",
  "miette",
- "mongodb",
  "oxifed",
  "serde",
  "serde_json",
