@@ -3,8 +3,6 @@ mod messaging;
 use clap::{Parser, Subcommand};
 use messaging::LavinMQClient;
 use miette::{Context, IntoDiagnostic, Result};
-use oxifed::messaging::ProfileCreateMessage;
-use std::collections::HashMap;
 
 /// Oxifed Admin CLI tool for managing profiles
 #[derive(Parser)]
@@ -263,28 +261,26 @@ async fn handle_person_command_messaging(client: &LavinMQClient, command: &Perso
             // Format subject with appropriate prefix if needed
             let formatted_subject = format_subject(subject);
             
-            // Create a message describing the Person creation
-            let mut message = serde_json::json!({
-                "action": "create_person",
-                "subject": formatted_subject,
-                "name": name,
-                "summary": summary,
-                "icon": icon,
-            });
-            
-            // Add custom properties if provided
-            if let Some(props_json) = properties {
-                let custom_props: serde_json::Value = serde_json::from_str(props_json)
+            // Parse custom properties if provided
+            let props = if let Some(props_json) = properties {
+                Some(serde_json::from_str(props_json)
                     .into_diagnostic()
-                    .wrap_err("Failed to parse custom properties JSON")?;
-                    
-                if let Some(obj) = message.as_object_mut() {
-                    obj.insert("properties".to_string(), custom_props);
-                }
-            }
+                    .wrap_err("Failed to parse custom properties JSON")?)
+            } else {
+                None
+            };
+            
+            // Create a structured message for Person creation
+            let message = oxifed::messaging::ProfileCreateMessage::new(
+                formatted_subject.clone(),
+                name.clone(),
+                summary.clone(),
+                icon.clone(),
+                props,
+            );
             
             // Send to LavinMQ
-            client.publish_json_message("person.create", &message).await
+            client.publish_message(&message).await
                 .into_diagnostic()
                 .wrap_err("Failed to publish Person creation message to LavinMQ")?;
                 
@@ -298,38 +294,26 @@ async fn handle_person_command_messaging(client: &LavinMQClient, command: &Perso
             icon,
             properties
         } => {
-            // Create a message describing the Person update
-            let mut message = serde_json::json!({
-                "action": "update_person",
-                "id": id
-            });
+            // Parse custom properties if provided
+            let props = if let Some(props_json) = properties {
+                Some(serde_json::from_str(props_json)
+                    .into_diagnostic()
+                    .wrap_err("Failed to parse custom properties JSON")?)
+            } else {
+                None
+            };
             
-            // Add optional fields if provided
-            if let Some(obj) = message.as_object_mut() {
-                if let Some(new_name) = name {
-                    obj.insert("name".to_string(), serde_json::Value::String(new_name.clone()));
-                }
-                
-                if let Some(new_summary) = summary {
-                    obj.insert("summary".to_string(), serde_json::Value::String(new_summary.clone()));
-                }
-                
-                if let Some(new_icon) = icon {
-                    obj.insert("icon".to_string(), serde_json::Value::String(new_icon.clone()));
-                }
-                
-                // Add custom properties if provided
-                if let Some(props_json) = properties {
-                    let custom_props: serde_json::Value = serde_json::from_str(props_json)
-                        .into_diagnostic()
-                        .wrap_err("Failed to parse custom properties JSON")?;
-                        
-                    obj.insert("properties".to_string(), custom_props);
-                }
-            }
+            // Create a structured message for Person update
+            let message = oxifed::messaging::ProfileUpdateMessage::new(
+                id.clone(),
+                name.clone(),
+                summary.clone(),
+                icon.clone(),
+                props,
+            );
             
             // Send to LavinMQ
-            client.publish_json_message("person.update", &message).await
+            client.publish_message(&message).await
                 .into_diagnostic()
                 .wrap_err("Failed to publish Person update message to LavinMQ")?;
                 
@@ -337,15 +321,14 @@ async fn handle_person_command_messaging(client: &LavinMQClient, command: &Perso
         },
         
         PersonCommands::Delete { id, force } => {
-            // Create a message requesting to delete a Person
-            let message = serde_json::json!({
-                "action": "delete_person",
-                "id": id,
-                "force": force
-            });
+            // Create a structured message for Person deletion
+            let message = oxifed::messaging::ProfileDeleteMessage::new(
+                id.clone(),
+                *force,
+            );
             
             // Send to LavinMQ
-            client.publish_json_message("person.delete", &message).await
+            client.publish_message(&message).await
                 .into_diagnostic()
                 .wrap_err("Failed to publish Person deletion message to LavinMQ")?;
                 
@@ -371,43 +354,28 @@ async fn handle_note_command_messaging(client: &LavinMQClient, command: &NoteCom
             tags,
             properties
         } => {
-            // Create a message describing the Note creation
-            let mut message = serde_json::json!({
-                "action": "create_note",
-                "author": author,
-                "content": content
-            });
+            // Parse custom properties if provided
+            let props = if let Some(props_json) = properties {
+                Some(serde_json::from_str(props_json)
+                    .into_diagnostic()
+                    .wrap_err("Failed to parse custom properties JSON")?)
+            } else {
+                None
+            };
             
-            // Add optional fields if provided
-            if let Some(obj) = message.as_object_mut() {
-                if let Some(title) = name {
-                    obj.insert("name".to_string(), serde_json::Value::String(title.clone()));
-                }
-                
-                if let Some(note_summary) = summary {
-                    obj.insert("summary".to_string(), serde_json::Value::String(note_summary.clone()));
-                }
-                
-                if let Some(mentions_str) = mentions {
-                    obj.insert("mentions".to_string(), serde_json::Value::String(mentions_str.clone()));
-                }
-                
-                if let Some(tags_str) = tags {
-                    obj.insert("tags".to_string(), serde_json::Value::String(tags_str.clone()));
-                }
-                
-                // Add custom properties if provided
-                if let Some(props_json) = properties {
-                    let custom_props: serde_json::Value = serde_json::from_str(props_json)
-                        .into_diagnostic()
-                        .wrap_err("Failed to parse custom properties JSON")?;
-                        
-                    obj.insert("properties".to_string(), custom_props);
-                }
-            }
+            // Create a structured message for Note creation
+            let message = oxifed::messaging::NoteCreateMessage::new(
+                author.clone(),
+                content.clone(),
+                name.clone(),
+                summary.clone(),
+                mentions.clone(),
+                tags.clone(),
+                props,
+            );
             
             // Send to LavinMQ
-            client.publish_json_message("note.create", &message).await
+            client.publish_message(&message).await
                 .into_diagnostic()
                 .wrap_err("Failed to publish Note creation message to LavinMQ")?;
                 
@@ -422,42 +390,27 @@ async fn handle_note_command_messaging(client: &LavinMQClient, command: &NoteCom
             tags,
             properties
         } => {
-            // Create a message describing the Note update
-            let mut message = serde_json::json!({
-                "action": "update_note",
-                "id": id
-            });
+            // Parse custom properties if provided
+            let props = if let Some(props_json) = properties {
+                Some(serde_json::from_str(props_json)
+                    .into_diagnostic()
+                    .wrap_err("Failed to parse custom properties JSON")?)
+            } else {
+                None
+            };
             
-            // Add optional fields if provided
-            if let Some(obj) = message.as_object_mut() {
-                if let Some(new_content) = content {
-                    obj.insert("content".to_string(), serde_json::Value::String(new_content.clone()));
-                }
-                
-                if let Some(new_name) = name {
-                    obj.insert("name".to_string(), serde_json::Value::String(new_name.clone()));
-                }
-                
-                if let Some(new_summary) = summary {
-                    obj.insert("summary".to_string(), serde_json::Value::String(new_summary.clone()));
-                }
-                
-                if let Some(tags_str) = tags {
-                    obj.insert("tags".to_string(), serde_json::Value::String(tags_str.clone()));
-                }
-                
-                // Add custom properties if provided
-                if let Some(props_json) = properties {
-                    let custom_props: serde_json::Value = serde_json::from_str(props_json)
-                        .into_diagnostic()
-                        .wrap_err("Failed to parse custom properties JSON")?;
-                        
-                    obj.insert("properties".to_string(), custom_props);
-                }
-            }
+            // Create a structured message for Note update
+            let message = oxifed::messaging::NoteUpdateMessage::new(
+                id.clone(),
+                content.clone(),
+                name.clone(),
+                summary.clone(),
+                tags.clone(),
+                props,
+            );
             
             // Send to LavinMQ
-            client.publish_json_message("note.update", &message).await
+            client.publish_message(&message).await
                 .into_diagnostic()
                 .wrap_err("Failed to publish Note update message to LavinMQ")?;
                 
@@ -465,15 +418,14 @@ async fn handle_note_command_messaging(client: &LavinMQClient, command: &NoteCom
         },
         
         NoteCommands::Delete { id, force } => {
-            // Create a message requesting to delete a Note
-            let message = serde_json::json!({
-                "action": "delete_note",
-                "id": id,
-                "force": force
-            });
+            // Create a structured message for Note deletion
+            let message = oxifed::messaging::NoteDeleteMessage::new(
+                id.clone(),
+                *force,
+            );
             
             // Send to LavinMQ
-            client.publish_json_message("note.delete", &message).await
+            client.publish_message(&message).await
                 .into_diagnostic()
                 .wrap_err("Failed to publish Note deletion message to LavinMQ")?;
                 
@@ -491,16 +443,14 @@ async fn handle_note_command_messaging(client: &LavinMQClient, command: &NoteCom
 async fn handle_activity_command_messaging(client: &LavinMQClient, command: &ActivityCommands) -> Result<()> {
     match command {
         ActivityCommands::Follow { actor, object } => {
-            // Create a message describing the Follow activity
-            let message = serde_json::json!({
-                "action": "create_activity",
-                "type": "Follow",
-                "actor": actor,
-                "object": object
-            });
+            // Create a structured message for Follow activity
+            let message = oxifed::messaging::FollowActivityMessage::new(
+                actor.clone(),
+                object.clone(),
+            );
             
             // Send to LavinMQ
-            client.publish_json_message("activity.follow", &message).await
+            client.publish_message(&message).await
                 .into_diagnostic()
                 .wrap_err("Failed to publish Follow activity message to LavinMQ")?;
                 
@@ -508,16 +458,14 @@ async fn handle_activity_command_messaging(client: &LavinMQClient, command: &Act
         },
         
         ActivityCommands::Like { actor, object } => {
-            // Create a message describing the Like activity
-            let message = serde_json::json!({
-                "action": "create_activity",
-                "type": "Like",
-                "actor": actor,
-                "object": object
-            });
+            // Create a structured message for Like activity
+            let message = oxifed::messaging::LikeActivityMessage::new(
+                actor.clone(),
+                object.clone(),
+            );
             
             // Send to LavinMQ
-            client.publish_json_message("activity.like", &message).await
+            client.publish_message(&message).await
                 .into_diagnostic()
                 .wrap_err("Failed to publish Like activity message to LavinMQ")?;
                 
@@ -525,27 +473,16 @@ async fn handle_activity_command_messaging(client: &LavinMQClient, command: &Act
         },
         
         ActivityCommands::Announce { actor, object, to, cc } => {
-            // Create a message describing the Announce activity
-            let mut message = serde_json::json!({
-                "action": "create_activity",
-                "type": "Announce",
-                "actor": actor,
-                "object": object
-            });
-            
-            // Add optional fields if provided
-            if let Some(obj) = message.as_object_mut() {
-                if let Some(to_str) = to {
-                    obj.insert("to".to_string(), serde_json::Value::String(to_str.clone()));
-                }
-                
-                if let Some(cc_str) = cc {
-                    obj.insert("cc".to_string(), serde_json::Value::String(cc_str.clone()));
-                }
-            }
+            // Create a structured message for Announce activity
+            let message = oxifed::messaging::AnnounceActivityMessage::new(
+                actor.clone(),
+                object.clone(),
+                to.clone(),
+                cc.clone(),
+            );
             
             // Send to LavinMQ
-            client.publish_json_message("activity.announce", &message).await
+            client.publish_message(&message).await
                 .into_diagnostic()
                 .wrap_err("Failed to publish Announce activity message to LavinMQ")?;
                 
@@ -553,15 +490,14 @@ async fn handle_activity_command_messaging(client: &LavinMQClient, command: &Act
         },
         
         ActivityCommands::Delete { id, force } => {
-            // Create a message requesting to delete an Activity
-            let message = serde_json::json!({
-                "action": "delete_activity",
-                "id": id,
-                "force": force
-            });
+            // Create a structured message for Activity deletion
+            let message = oxifed::messaging::ActivityDeleteMessage::new(
+                id.clone(),
+                *force,
+            );
             
             // Send to LavinMQ
-            client.publish_json_message("activity.delete", &message).await
+            client.publish_message(&message).await
                 .into_diagnostic()
                 .wrap_err("Failed to publish Activity deletion message to LavinMQ")?;
                 
