@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use url::Url;
 pub mod client;
 pub mod httpsignature;
-pub mod webfinger;
 pub mod messaging;
+pub mod webfinger;
 
 /// Represents types of objects in ActivityPub.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,10 +273,53 @@ pub struct Collection {
     pub additional_properties: HashMap<String, Value>,
 }
 
+/// Actor record based on ActivityPub
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Actor {
+    pub id: String,
+    pub name: String,
+    pub domain: String,
+    pub inbox_url: String,
+    pub outbox_url: String,
+    pub following_url: Option<String>,
+    pub followers_url: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub endpoints: HashMap<String, String>,
+    pub icon: Option<Attachment>,
+    pub attachment: Option<Vec<Attachment>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum Attachment {
+    Image(ImageAttachment),
+    PropertyValue(PropertyAttachment),
+    File(FileAttachment),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PropertyAttachment {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageAttachment {
+    pub url: String,
+    pub media_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileAttachment {
+    pub url: String,
+}
+
 /// A deserializer helper that can parse different ActivityPub entities.
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum ActivityPubEntity {
+    Actor(Actor),
     Activity(Activity),
     Object(Object),
     Link(Link),
@@ -316,6 +359,12 @@ impl<'de> Deserialize<'de> for ActivityPubEntity {
                         let link: Link = serde_json::from_value(value.clone())
                             .map_err(serde::de::Error::custom)?;
                         Ok(ActivityPubEntity::Link(link))
+                    }
+                    // Use Actor for Actors
+                    "Person" | "Application" | "Group" | "Organization" | "Service" => {
+                        let actor: Actor = serde_json::from_value(value.clone())
+                            .map_err(serde::de::Error::custom)?;
+                        Ok(ActivityPubEntity::Actor(actor))
                     }
                     // Default to Object for all other types
                     _ => {

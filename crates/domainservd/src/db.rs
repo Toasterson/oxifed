@@ -26,38 +26,6 @@ pub struct Domain {
     pub enabled: bool,
 }
 
-/// Actor record based on ActivityPub
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Actor {
-    pub id: String,
-    pub actor_type: String,
-    pub name: Option<String>,
-    pub username: String,
-    pub domain: String,
-    pub inbox_url: String,
-    pub outbox_url: String,
-    pub following_url: Option<String>,
-    pub followers_url: Option<String>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-}
-
-/// Link in a profile
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Link {
-    pub title: String,
-    pub url: String,
-    pub description: Option<String>,
-}
-
-/// Personal profile information
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Profile {
-    pub username: String,
-    pub handle: String,
-    pub links: Vec<Link>,
-}
-
 /// MongoDB connection manager
 pub struct MongoDB {
     #[allow(dead_code)]
@@ -101,18 +69,24 @@ impl MongoDB {
         Ok(())
     }
 
-    /// Get domains collection
     pub fn domains_collection(&self) -> Collection<Domain> {
         self.db.collection("domains")
     }
 
-    /// Get an Actor collection
-    pub fn actors_collection(&self) -> Collection<Actor> {
+    pub fn actors_collection(&self) -> Collection<oxifed::Actor> {
         self.db.collection("actors")
     }
 
+    pub fn outbox_collection(&self, username: &str) -> Collection<oxifed::Object> {
+        self.db.collection(&format!("{}.outbox", username))
+    }
+
+    pub fn activities_collection(&self) -> Collection<oxifed::Activity> {
+        self.db.collection("activities")
+    }
+
     /// Get profiles collection
-    pub fn profiles_collection(&self) -> Collection<JrdResource> {
-        self.db.collection("profiles")
+    pub fn webfinger_profiles_collection(&self) -> Collection<JrdResource> {
+        self.db.collection("webfinger_profiles")
     }
 }

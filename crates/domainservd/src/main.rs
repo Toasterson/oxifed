@@ -3,15 +3,15 @@
 //! This service is responsible for handling domain-specific operations,
 //! including webfinger protocol implementation, according to RFC 7033.
 
-mod webfinger;
 mod db;
+mod rabbitmq;
+mod webfinger;
 
 use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
-use std::path::absolute;
+use db::MongoDB;
+use std::io;
 use std::sync::Arc;
 use thiserror::Error;
-use std::io;
-use db::MongoDB;
 
 /// Shared application state
 #[derive(Clone)]
@@ -19,7 +19,7 @@ pub struct AppState {
     /// MongoDB connection
     pub db: Arc<MongoDB>,
     /// LavinMQ connection pool
-    pub mq_pool: RabbitPool,
+    pub mq_pool: deadpool_lapin::Pool,
 }
 
 /// Errors that can occur in the domainservd service
@@ -68,8 +68,6 @@ async fn main() -> Result<(), DomainservdError> {
     tracing::info!("MongoDB initialized successfully");
 
     // Share MongoDB connection across handlers
-    let db = std::sync::Arc::new(mongodb);
-
     let db = Arc::new(mongodb);
 
     // Initialize LavinMQ connection
@@ -83,14 +81,14 @@ async fn main() -> Result<(), DomainservdError> {
     rabbitmq::init_rabbitmq(&mq_pool).await?;
     tracing::info!("LavinMQ initialized successfully");
 
-    // Create application state
+    // Create an application state
     let app_state = AppState {
         db: db.clone(),
         mq_pool: mq_pool.clone(),
     };
 
     // Start message consumer in a separate task
-    rabbitmq::start_consumer(mq_pool, db.clone()).await?;
+    rabbitmq::start_consumers(mq_pool, db.clone()).await?;
 
     let app = Router::new()
         .route("/health", get(health_check))

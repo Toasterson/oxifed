@@ -86,9 +86,9 @@ async fn handle_webfinger(
         .clone();
 
     // Query MongoDB for the JrdResource
-    let profiles_collection = state.db.profiles_collection();
+    let profiles_collection = state.db.webfinger_profiles_collection();
     let filter = doc! { "subject": subject.clone() };
-    
+
     // Attempt to find the resource in MongoDB
     let jrd_result = profiles_collection.find_one(filter).await?;
 
@@ -116,9 +116,5 @@ async fn handle_webfinger(
 
 /// Creates a router for webfinger endpoints
 pub fn webfinger_router(_state: AppState) -> Router<AppState> {
-    Router::new()
-        .route(
-            "/.well-known/webfinger",
-            get(handle_webfinger)
-        )
+    Router::new().route("/.well-known/webfinger", get(handle_webfinger))
 }

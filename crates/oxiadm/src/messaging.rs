@@ -2,12 +2,8 @@
 //!
 //! This module handles the communication with LavinMQ for the oxiadm tool
 
-use lapin::{
-    options::BasicPublishOptions
-
-    , Connection, ConnectionProperties,
-};
 use lapin::protocol::basic::AMQPProperties;
+use lapin::{Connection, ConnectionProperties, options::BasicPublishOptions};
 use miette::{IntoDiagnostic, Result};
 use oxifed::messaging::Message;
 use serde::Serialize;
@@ -46,8 +42,7 @@ impl LavinMQClient {
     pub async fn new(url: &str) -> Result<Self> {
         let connection = Connection::connect(
             url,
-            ConnectionProperties::default()
-                .with_connection_name("oxiadm".into())
+            ConnectionProperties::default().with_connection_name("oxiadm".into()),
         )
         .await
         .into_diagnostic()
@@ -57,7 +52,10 @@ impl LavinMQClient {
     }
 
     /// Publish a message that implements the Message trait
-    pub async fn publish_message<T: Message + Serialize>(&self, message: &T) -> Result<(), MessagingError> {
+    pub async fn publish_message<T: Message + Serialize>(
+        &self,
+        message: &T,
+    ) -> Result<(), MessagingError> {
         let channel = self.connection.create_channel().await?;
 
         // Serialize the message to JSON
@@ -78,7 +76,11 @@ impl LavinMQClient {
     }
 
     /// Publish a JSON message (legacy method)
-    pub async fn publish_json_message(&self, routing_key: &str, payload: &Value) -> Result<(), MessagingError> {
+    pub async fn publish_json_message(
+        &self,
+        routing_key: &str,
+        payload: &Value,
+    ) -> Result<(), MessagingError> {
         let channel = self.connection.create_channel().await?;
 
         // Serialize the message to JSON
@@ -87,8 +89,8 @@ impl LavinMQClient {
         // Publish the message
         channel
             .basic_publish(
-                "",            // exchange
-                routing_key,   // routing key
+                "",          // exchange
+                routing_key, // routing key
                 BasicPublishOptions::default(),
                 &payload,
                 AMQPProperties::default(),

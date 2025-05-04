@@ -60,7 +60,7 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            user_agent: String::from("ActivityPub-RS/0.1.0"),
+            user_agent: String::from("Oxifed/0.1.0"),
             http_signature_config: None,
             oauth_token: None,
         }
