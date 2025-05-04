@@ -1,0 +1,106 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/activitystreams",
+    "https://w3id.org/security/v1",
+    {
+      "manuallyApprovesFollowers": "as:manuallyApprovesFollowers",
+      "toot": "http://joinmastodon.org/ns#",
+      "featured": {
+        "@id": "toot:featured",
+        "@type": "@id"
+      },
+      "featuredTags": {
+        "@id": "toot:featuredTags",
+        "@type": "@id"
+      },
+      "alsoKnownAs": {
+        "@id": "as:alsoKnownAs",
+        "@type": "@id"
+      },
+      "movedTo": {
+        "@id": "as:movedTo",
+        "@type": "@id"
+      },
+      "schema": "http://schema.org#",
+      "PropertyValue": "schema:PropertyValue",
+      "value": "schema:value",
+      "discoverable": "toot:discoverable",
+      "suspended": "toot:suspended",
+      "memorial": "toot:memorial",
+      "indexable": "toot:indexable",
+      "attributionDomains": {
+        "@id": "toot:attributionDomains",
+        "@type": "@id"
+      },
+      "Hashtag": "as:Hashtag",
+      "focalPoint": {
+        "@container": "@list",
+        "@id": "toot:focalPoint"
+      }
+    }
+  ],
+  "id": "https://chaos.social/users/Toasterson",
+  "type": "Person",
+  "following": "https://chaos.social/users/Toasterson/following",
+  "followers": "https://chaos.social/users/Toasterson/followers",
+  "inbox": "https://chaos.social/users/Toasterson/inbox",
+  "outbox": "https://chaos.social/users/Toasterson/outbox",
+  "featured": "https://chaos.social/users/Toasterson/collections/featured",
+  "featuredTags": "https://chaos.social/users/Toasterson/collections/tags",
+  "preferredUsername": "Toasterson",
+  "name": "Toasterson",
+  "summary": "\u003cp\u003eThis is \u003ca href=\"https://chaos.social/tags/Unix\" class=\"mention hashtag\" rel=\"tag\"\u003e#\u003cspan\u003eUnix\u003c/span\u003e\u003c/a\u003e, use the Pipe Padawan\u003c/p\u003e",
+  "url": "https://chaos.social/@Toasterson",
+  "manuallyApprovesFollowers": false,
+  "discoverable": true,
+  "indexable": false,
+  "published": "2019-01-15T00:00:00Z",
+  "memorial": false,
+  "publicKey": {
+    "id": "https://chaos.social/users/Toasterson#main-key",
+    "owner": "https://chaos.social/users/Toasterson",
+    "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4sp9aZxo3M2aKZ78hLfY\nQghGM4wVH86GT7wKw4z/ne047Mu4AMduEnxftYPic/9hKrvOpSgPvKXTtVo8gzIU\nfw5rlHHzE2F3kdzNS3Tjh/Y0yiA9yHkwwjl9NexgeHToSOrPGxiKqcmxkCZ5C33O\nNQxFJonwFOJCTnXkYCZZW+Eq3zco0g3gGnbxrhN7rItVnmVJnx186POgi0Qff+5Y\njUsQUGFfUlqi8x9THaCGI6qnBV+A1Fr0syHQ/DnaHaGpsa5iu53FiucaOgQYCyOx\nK3W48QHzeruD+HNrnTUj4q/o5ET0iNpaMgEQy1Qk2bfRrh/aEtSkvv9OvMvHhPej\nIQIDAQAB\n-----END PUBLIC KEY-----\n"
+  },
+  "tag": [
+    {
+      "type": "Hashtag",
+      "href": "https://chaos.social/tags/unix",
+      "name": "#unix"
+    }
+  ],
+  "attachment": [
+    {
+      "type": "PropertyValue",
+      "name": "Sponsors",
+      "value": "\u003ca href=\"https://github.com/sponsors/Toasterson\" target=\"_blank\" rel=\"nofollow noopener noreferrer me\" translate=\"no\"\u003e\u003cspan class=\"invisible\"\u003ehttps://\u003c/span\u003e\u003cspan class=\"\"\u003egithub.com/sponsors/Toasterson\u003c/span\u003e\u003cspan class=\"invisible\"\u003e\u003c/span\u003e\u003c/a\u003e"
+    },
+    {
+      "type": "PropertyValue",
+      "name": "GitHub",
+      "value": "\u003ca href=\"https://github.com/Toasterson\" target=\"_blank\" rel=\"nofollow noopener noreferrer me\" translate=\"no\"\u003e\u003cspan class=\"invisible\"\u003ehttps://\u003c/span\u003e\u003cspan class=\"\"\u003egithub.com/Toasterson\u003c/span\u003e\u003cspan class=\"invisible\"\u003e\u003c/span\u003e\u003c/a\u003e"
+    },
+    {
+      "type": "PropertyValue",
+      "name": "Website",
+      "value": "\u003ca href=\"https://www.wegmueller.it\" target=\"_blank\" rel=\"nofollow noopener noreferrer me\" translate=\"no\"\u003e\u003cspan class=\"invisible\"\u003ehttps://www.\u003c/span\u003e\u003cspan class=\"\"\u003ewegmueller.it\u003c/span\u003e\u003cspan class=\"invisible\"\u003e\u003c/span\u003e\u003c/a\u003e"
+    },
+    {
+      "type": "PropertyValue",
+      "name": "All links",
+      "value": "\u003ca href=\"https://linktr.ee/toasterson\" target=\"_blank\" rel=\"nofollow noopener noreferrer me\" translate=\"no\"\u003e\u003cspan class=\"invisible\"\u003ehttps://\u003c/span\u003e\u003cspan class=\"\"\u003elinktr.ee/toasterson\u003c/span\u003e\u003cspan class=\"invisible\"\u003e\u003c/span\u003e\u003c/a\u003e"
+    }
+  ],
+  "endpoints": {
+    "sharedInbox": "https://chaos.social/inbox"
+  },
+  "icon": {
+    "type": "Image",
+    "mediaType": "image/png",
+    "url": "https://assets.chaos.social/accounts/avatars/000/142/804/original/685ea50e1fbe1663.png"
+  },
+  "image": {
+    "type": "Image",
+    "mediaType": "image/jpeg",
+    "url": "https://assets.chaos.social/accounts/headers/000/142/804/original/f11f9026ef179d44.jpg"
+  }
+}

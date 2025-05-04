@@ -1,0 +1,7 @@
+{
+  "@context": "https://www.w3.org/ns/activitystreams",
+  "id": "https://chaos.social/users/Toasterson/followers",
+  "type": "OrderedCollection",
+  "totalItems": 565,
+  "first": "https://chaos.social/users/Toasterson/followers?page=1"
+}

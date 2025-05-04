@@ -1,0 +1,8 @@
+{
+  "@context": "https://www.w3.org/ns/activitystreams",
+  "id": "https://chaos.social/users/Toasterson/outbox",
+  "type": "OrderedCollection",
+  "totalItems": 8736,
+  "first": "https://chaos.social/users/Toasterson/outbox?page=true",
+  "last": "https://chaos.social/users/Toasterson/outbox?min_id=0\u0026page=true"
+}

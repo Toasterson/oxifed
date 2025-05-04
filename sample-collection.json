@@ -1,0 +1,889 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/activitystreams",
+    {
+      "ostatus": "http://ostatus.org#",
+      "atomUri": "ostatus:atomUri",
+      "inReplyToAtomUri": "ostatus:inReplyToAtomUri",
+      "conversation": "ostatus:conversation",
+      "sensitive": "as:sensitive",
+      "toot": "http://joinmastodon.org/ns#",
+      "votersCount": "toot:votersCount",
+      "blurhash": "toot:blurhash",
+      "focalPoint": {
+        "@container": "@list",
+        "@id": "toot:focalPoint"
+      },
+      "Hashtag": "as:Hashtag"
+    }
+  ],
+  "id": "https://chaos.social/users/Toasterson/outbox?page=true",
+  "type": "OrderedCollectionPage",
+  "next": "https://chaos.social/users/Toasterson/outbox?max_id=114417025639332298\u0026page=true",
+  "prev": "https://chaos.social/users/Toasterson/outbox?min_id=114449557751835840\u0026page=true",
+  "partOf": "https://chaos.social/users/Toasterson/outbox",
+  "orderedItems": [
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114449557751835840/activity",
+      "type": "Announce",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-05-04T12:27:40Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://lain.com/users/lain",
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": "https://lain.com/objects/f4ccac39-7e61-4203-acd5-94a07581d7f5"
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114438583806042768/activity",
+      "type": "Announce",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-05-02T13:56:50Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://mastodon.social/users/hq",
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": "https://mastodon.social/users/hq/statuses/114437885309754044"
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114433227934479193/activity",
+      "type": "Announce",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-05-01T15:14:46Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://fedi.simonwillison.net/users/simon",
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": "https://fedi.simonwillison.net/users/simon/statuses/114433067450523652"
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114431375422303004/activity",
+      "type": "Announce",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-05-01T07:23:39Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://waldvogel.family/users/marcel",
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": "https://waldvogel.family/users/marcel/statuses/114431372561368453"
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114431288504326215/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-05-01T07:01:33Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://chaos.social/users/Toasterson/followers",
+        "https://techhub.social/users/Techmeme"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114431288504326215",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": "https://techhub.social/users/Techmeme/statuses/114431069699250504",
+        "published": "2025-05-01T07:01:33Z",
+        "url": "https://chaos.social/@Toasterson/114431288504326215",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://www.w3.org/ns/activitystreams#Public"
+        ],
+        "cc": [
+          "https://chaos.social/users/Toasterson/followers",
+          "https://techhub.social/users/Techmeme"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114431288504326215",
+        "inReplyToAtomUri": "https://techhub.social/users/Techmeme/statuses/114431069699250504",
+        "conversation": "tag:techhub.social,2025-05-01:objectId=259681871:objectType=Conversation",
+        "content": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://techhub.social/@Techmeme\" class=\"u-url mention\"\u003e@\u003cspan\u003eTechmeme\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e Huh? Since when? I always have an issue that RDP used to block my connection when that happened in a Customer machine and I had to spend time sending mails to Support to get it fixed otherwise the service I wanted to restart would not be possible.\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://techhub.social/@Techmeme\" class=\"u-url mention\"\u003e@\u003cspan\u003eTechmeme\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e Huh? Since when? I always have an issue that RDP used to block my connection when that happened in a Customer machine and I had to spend time sending mails to Support to get it fixed otherwise the service I wanted to restart would not be possible.\u003c/p\u003e"
+        },
+        "attachment": [],
+        "tag": [
+          {
+            "type": "Mention",
+            "href": "https://techhub.social/users/Techmeme",
+            "name": "@Techmeme@techhub.social"
+          }
+        ],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114431288504326215/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114431288504326215/replies?only_other_accounts=true\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114431288504326215/replies",
+            "items": []
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114431288504326215/likes",
+          "type": "Collection",
+          "totalItems": 0
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114431288504326215/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114421548111092438/activity",
+      "type": "Announce",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T13:44:26Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://chaos.social/users/layered",
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": "https://chaos.social/users/layered/statuses/114421530567169595"
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114421544144804273/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T13:43:26Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114421544144804273",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": null,
+        "published": "2025-04-29T13:43:26Z",
+        "url": "https://chaos.social/@Toasterson/114421544144804273",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://www.w3.org/ns/activitystreams#Public"
+        ],
+        "cc": [
+          "https://chaos.social/users/Toasterson/followers"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114421544144804273",
+        "inReplyToAtomUri": null,
+        "conversation": "tag:chaos.social,2025-04-29:objectId=266257011:objectType=Conversation",
+        "content": "\u003cp\u003eWell this looks neat! \u003ca href=\"https://bitcraftonline.com/\" target=\"_blank\" rel=\"nofollow noopener noreferrer\" translate=\"no\"\u003e\u003cspan class=\"invisible\"\u003ehttps://\u003c/span\u003e\u003cspan class=\"\"\u003ebitcraftonline.com/\u003c/span\u003e\u003cspan class=\"invisible\"\u003e\u003c/span\u003e\u003c/a\u003e And it\u0026#39;s going to be OSS and in rust :)\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003eWell this looks neat! \u003ca href=\"https://bitcraftonline.com/\" target=\"_blank\" rel=\"nofollow noopener noreferrer\" translate=\"no\"\u003e\u003cspan class=\"invisible\"\u003ehttps://\u003c/span\u003e\u003cspan class=\"\"\u003ebitcraftonline.com/\u003c/span\u003e\u003cspan class=\"invisible\"\u003e\u003c/span\u003e\u003c/a\u003e And it\u0026#39;s going to be OSS and in rust :)\u003c/p\u003e"
+        },
+        "attachment": [],
+        "tag": [],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421544144804273/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114421544144804273/replies?only_other_accounts=true\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114421544144804273/replies",
+            "items": []
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421544144804273/likes",
+          "type": "Collection",
+          "totalItems": 0
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421544144804273/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114421542382620847/activity",
+      "type": "Announce",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T13:42:59Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://mastodon.social/users/rust_discussions",
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": "https://mastodon.social/users/rust_discussions/statuses/114421482579482600"
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114421302770292880/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T12:42:03Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://chaos.social/users/Toasterson/followers",
+        "https://mastodon.xaetacore.net/users/XaetaCore"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114421302770292880",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": "https://mastodon.xaetacore.net/users/XaetaCore/statuses/114421297931147657",
+        "published": "2025-04-29T12:42:03Z",
+        "url": "https://chaos.social/@Toasterson/114421302770292880",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://www.w3.org/ns/activitystreams#Public"
+        ],
+        "cc": [
+          "https://chaos.social/users/Toasterson/followers",
+          "https://mastodon.xaetacore.net/users/XaetaCore"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114421302770292880",
+        "inReplyToAtomUri": "https://mastodon.xaetacore.net/users/XaetaCore/statuses/114421297931147657",
+        "conversation": "tag:chaos.social,2025-04-29:objectId=266240402:objectType=Conversation",
+        "content": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mastodon.xaetacore.net/@XaetaCore\" class=\"u-url mention\"\u003e@\u003cspan\u003exaetacore\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e It is :)\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mastodon.xaetacore.net/@XaetaCore\" class=\"u-url mention\"\u003e@\u003cspan\u003exaetacore\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e It is :)\u003c/p\u003e"
+        },
+        "attachment": [],
+        "tag": [
+          {
+            "type": "Mention",
+            "href": "https://mastodon.xaetacore.net/users/XaetaCore",
+            "name": "@xaetacore@mastodon.xaetacore.net"
+          }
+        ],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421302770292880/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114421302770292880/replies?only_other_accounts=true\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114421302770292880/replies",
+            "items": []
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421302770292880/likes",
+          "type": "Collection",
+          "totalItems": 0
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421302770292880/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114421302363498017/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T12:41:57Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://chaos.social/users/Toasterson/followers",
+        "https://mstd.seungjin.net/users/seungjin"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114421302363498017",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": "https://mstd.seungjin.net/users/seungjin/statuses/114421284672697263",
+        "published": "2025-04-29T12:41:57Z",
+        "url": "https://chaos.social/@Toasterson/114421302363498017",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://www.w3.org/ns/activitystreams#Public"
+        ],
+        "cc": [
+          "https://chaos.social/users/Toasterson/followers",
+          "https://mstd.seungjin.net/users/seungjin"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114421302363498017",
+        "inReplyToAtomUri": "https://mstd.seungjin.net/users/seungjin/statuses/114421284672697263",
+        "conversation": "tag:chaos.social,2025-04-29:objectId=266240402:objectType=Conversation",
+        "content": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mstd.seungjin.net/@seungjin\" class=\"u-url mention\"\u003e@\u003cspan\u003eseungjin\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e Hahaha, Helix is my favourite Editor. But I am exploring the Jetbrains AI at the moment but I love the IDE of Jetbrains not because the editor. Because of the tool views.\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mstd.seungjin.net/@seungjin\" class=\"u-url mention\"\u003e@\u003cspan\u003eseungjin\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e Hahaha, Helix is my favourite Editor. But I am exploring the Jetbrains AI at the moment but I love the IDE of Jetbrains not because the editor. Because of the tool views.\u003c/p\u003e"
+        },
+        "attachment": [],
+        "tag": [
+          {
+            "type": "Mention",
+            "href": "https://mstd.seungjin.net/users/seungjin",
+            "name": "@seungjin@mstd.seungjin.net"
+          }
+        ],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421302363498017/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114421302363498017/replies?only_other_accounts=true\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114421302363498017/replies",
+            "items": []
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421302363498017/likes",
+          "type": "Collection",
+          "totalItems": 1
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421302363498017/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114421266318442408/activity",
+      "type": "Announce",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T12:32:47Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://fosstodon.org/users/libreoffice",
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": "https://fosstodon.org/users/libreoffice/statuses/114420405083717141"
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114421256255363039/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T12:30:13Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114421256255363039",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": null,
+        "published": "2025-04-29T12:30:13Z",
+        "url": "https://chaos.social/@Toasterson/114421256255363039",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://www.w3.org/ns/activitystreams#Public"
+        ],
+        "cc": [
+          "https://chaos.social/users/Toasterson/followers"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114421256255363039",
+        "inReplyToAtomUri": null,
+        "conversation": "tag:chaos.social,2025-04-29:objectId=266240402:objectType=Conversation",
+        "content": "\u003cp\u003eKidos in the Garden playing and dad on the balcony coding remote in my workstation with \u003ca href=\"https://chaos.social/tags/jetbrains\" class=\"mention hashtag\" rel=\"tag\"\u003e#\u003cspan\u003ejetbrains\u003c/span\u003e\u003c/a\u003e of course and \u003ca href=\"https://chaos.social/tags/netbird\" class=\"mention hashtag\" rel=\"tag\"\u003e#\u003cspan\u003enetbird\u003c/span\u003e\u003c/a\u003e vpn :)\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003eKidos in the Garden playing and dad on the balcony coding remote in my workstation with \u003ca href=\"https://chaos.social/tags/jetbrains\" class=\"mention hashtag\" rel=\"tag\"\u003e#\u003cspan\u003ejetbrains\u003c/span\u003e\u003c/a\u003e of course and \u003ca href=\"https://chaos.social/tags/netbird\" class=\"mention hashtag\" rel=\"tag\"\u003e#\u003cspan\u003enetbird\u003c/span\u003e\u003c/a\u003e vpn :)\u003c/p\u003e"
+        },
+        "updated": "2025-04-29T12:32:34Z",
+        "attachment": [
+          {
+            "type": "Document",
+            "mediaType": "image/jpeg",
+            "url": "https://assets.chaos.social/media_attachments/files/114/421/256/031/631/645/original/d21f1a29a3ebf24e.jpeg",
+            "name": "Picture of a balcony with home made hochbeet with salad and a grill. On the Table a Tabet and some cabling setup for remote development.",
+            "blurhash": "UIE2?^~oRQr?=:IUE2xbn3kWx]xZR7WFtQi^",
+            "focalPoint": [
+              0.0,
+              0.0
+            ],
+            "width": 2494,
+            "height": 3325
+          }
+        ],
+        "tag": [
+          {
+            "type": "Hashtag",
+            "href": "https://chaos.social/tags/jetbrains",
+            "name": "#jetbrains"
+          },
+          {
+            "type": "Hashtag",
+            "href": "https://chaos.social/tags/netbird",
+            "name": "#netbird"
+          }
+        ],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421256255363039/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114421256255363039/replies?only_other_accounts=true\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114421256255363039/replies",
+            "items": []
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421256255363039/likes",
+          "type": "Collection",
+          "totalItems": 2
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114421256255363039/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114420094745601740/activity",
+      "type": "Announce",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T07:34:50Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://mastodon.xyz/users/johl",
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": "https://mastodon.xyz/users/johl/statuses/114420055145241240"
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114420060299745910/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T07:26:04Z",
+      "to": [
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "cc": [
+        "https://www.w3.org/ns/activitystreams#Public",
+        "https://mastodon.online/users/joho"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114420060299745910",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": "https://chaos.social/users/Toasterson/statuses/114420057293379202",
+        "published": "2025-04-29T07:26:04Z",
+        "url": "https://chaos.social/@Toasterson/114420060299745910",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://chaos.social/users/Toasterson/followers"
+        ],
+        "cc": [
+          "https://www.w3.org/ns/activitystreams#Public",
+          "https://mastodon.online/users/joho"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114420060299745910",
+        "inReplyToAtomUri": "https://chaos.social/users/Toasterson/statuses/114420057293379202",
+        "conversation": "tag:mastodon.online,2025-04-29:objectId=499849754:objectType=Conversation",
+        "content": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mastodon.online/@joho\" class=\"u-url mention\"\u003e@\u003cspan\u003ejoho\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e Also always check \u003ca href=\"https://letsdebug.net/\" target=\"_blank\" rel=\"nofollow noopener noreferrer\" translate=\"no\"\u003e\u003cspan class=\"invisible\"\u003ehttps://\u003c/span\u003e\u003cspan class=\"\"\u003eletsdebug.net/\u003c/span\u003e\u003cspan class=\"invisible\"\u003e\u003c/span\u003e\u003c/a\u003e to get detailed steps to fix things\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mastodon.online/@joho\" class=\"u-url mention\"\u003e@\u003cspan\u003ejoho\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e Also always check \u003ca href=\"https://letsdebug.net/\" target=\"_blank\" rel=\"nofollow noopener noreferrer\" translate=\"no\"\u003e\u003cspan class=\"invisible\"\u003ehttps://\u003c/span\u003e\u003cspan class=\"\"\u003eletsdebug.net/\u003c/span\u003e\u003cspan class=\"invisible\"\u003e\u003c/span\u003e\u003c/a\u003e to get detailed steps to fix things\u003c/p\u003e"
+        },
+        "attachment": [],
+        "tag": [
+          {
+            "type": "Mention",
+            "href": "https://mastodon.online/users/joho",
+            "name": "@joho@mastodon.online"
+          }
+        ],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114420060299745910/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114420060299745910/replies?only_other_accounts=true\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114420060299745910/replies",
+            "items": []
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114420060299745910/likes",
+          "type": "Collection",
+          "totalItems": 2
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114420060299745910/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114420057293379202/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T07:25:18Z",
+      "to": [
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "cc": [
+        "https://www.w3.org/ns/activitystreams#Public",
+        "https://mastodon.online/users/joho"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114420057293379202",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": "https://mastodon.online/users/joho/statuses/114420052922902020",
+        "published": "2025-04-29T07:25:18Z",
+        "url": "https://chaos.social/@Toasterson/114420057293379202",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://chaos.social/users/Toasterson/followers"
+        ],
+        "cc": [
+          "https://www.w3.org/ns/activitystreams#Public",
+          "https://mastodon.online/users/joho"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114420057293379202",
+        "inReplyToAtomUri": "https://mastodon.online/users/joho/statuses/114420052922902020",
+        "conversation": "tag:mastodon.online,2025-04-29:objectId=499849754:objectType=Conversation",
+        "content": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mastodon.online/@joho\" class=\"u-url mention\"\u003e@\u003cspan\u003ejoho\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e CAA is not part of DNSSEC but in this Case I guess you are missing the CAA record. \u003ca href=\"https://letsencrypt.org/docs/caa/\" target=\"_blank\" rel=\"nofollow noopener noreferrer\" translate=\"no\"\u003e\u003cspan class=\"invisible\"\u003ehttps://\u003c/span\u003e\u003cspan class=\"\"\u003eletsencrypt.org/docs/caa/\u003c/span\u003e\u003cspan class=\"invisible\"\u003e\u003c/span\u003e\u003c/a\u003e\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mastodon.online/@joho\" class=\"u-url mention\"\u003e@\u003cspan\u003ejoho\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e CAA is not part of DNSSEC but in this Case I guess you are missing the CAA record. \u003ca href=\"https://letsencrypt.org/docs/caa/\" target=\"_blank\" rel=\"nofollow noopener noreferrer\" translate=\"no\"\u003e\u003cspan class=\"invisible\"\u003ehttps://\u003c/span\u003e\u003cspan class=\"\"\u003eletsencrypt.org/docs/caa/\u003c/span\u003e\u003cspan class=\"invisible\"\u003e\u003c/span\u003e\u003c/a\u003e\u003c/p\u003e"
+        },
+        "attachment": [],
+        "tag": [
+          {
+            "type": "Mention",
+            "href": "https://mastodon.online/users/joho",
+            "name": "@joho@mastodon.online"
+          }
+        ],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114420057293379202/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114420057293379202/replies?min_id=114420060299745910\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114420057293379202/replies",
+            "items": [
+              "https://chaos.social/users/Toasterson/statuses/114420060299745910"
+            ]
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114420057293379202/likes",
+          "type": "Collection",
+          "totalItems": 0
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114420057293379202/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114420030444063361/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-29T07:18:29Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://chaos.social/users/Toasterson/followers",
+        "https://mastodon.online/users/joho"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114420030444063361",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": "https://mastodon.online/users/joho/statuses/114419995011881938",
+        "published": "2025-04-29T07:18:29Z",
+        "url": "https://chaos.social/@Toasterson/114420030444063361",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://www.w3.org/ns/activitystreams#Public"
+        ],
+        "cc": [
+          "https://chaos.social/users/Toasterson/followers",
+          "https://mastodon.online/users/joho"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114420030444063361",
+        "inReplyToAtomUri": "https://mastodon.online/users/joho/statuses/114419995011881938",
+        "conversation": "tag:mastodon.online,2025-04-29:objectId=499849754:objectType=Conversation",
+        "content": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mastodon.online/@joho\" class=\"u-url mention\"\u003e@\u003cspan\u003ejoho\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e CAA is a DNS record that can limit the ACME Authorities that are allowed to issue for this domain. A missing one can also be a problem. You have to fixup the CAA type record in the domain\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mastodon.online/@joho\" class=\"u-url mention\"\u003e@\u003cspan\u003ejoho\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e CAA is a DNS record that can limit the ACME Authorities that are allowed to issue for this domain. A missing one can also be a problem. You have to fixup the CAA type record in the domain\u003c/p\u003e"
+        },
+        "attachment": [],
+        "tag": [
+          {
+            "type": "Mention",
+            "href": "https://mastodon.online/users/joho",
+            "name": "@joho@mastodon.online"
+          }
+        ],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114420030444063361/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114420030444063361/replies?only_other_accounts=true\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114420030444063361/replies",
+            "items": []
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114420030444063361/likes",
+          "type": "Collection",
+          "totalItems": 1
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114420030444063361/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114417249618347005/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-28T19:31:17Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://chaos.social/users/Toasterson/followers",
+        "https://snac.bsd.cafe/puffy4life",
+        "https://mastodon.bsd.cafe/users/stefano"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114417249618347005",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": "https://snac.bsd.cafe/puffy4life/p/1745867131.987406",
+        "published": "2025-04-28T19:31:17Z",
+        "url": "https://chaos.social/@Toasterson/114417249618347005",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://www.w3.org/ns/activitystreams#Public"
+        ],
+        "cc": [
+          "https://chaos.social/users/Toasterson/followers",
+          "https://snac.bsd.cafe/puffy4life",
+          "https://mastodon.bsd.cafe/users/stefano"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114417249618347005",
+        "inReplyToAtomUri": "https://snac.bsd.cafe/puffy4life/p/1745867131.987406",
+        "conversation": "tag:chaos.social,2025-04-28:objectId=266056338:objectType=Conversation",
+        "content": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://snac.bsd.cafe/puffy4life\" class=\"u-url mention\"\u003e@\u003cspan\u003epuffy4life\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e \u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mastodon.bsd.cafe/@stefano\" class=\"u-url mention\"\u003e@\u003cspan\u003estefano\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e jup. Even boosted\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://snac.bsd.cafe/puffy4life\" class=\"u-url mention\"\u003e@\u003cspan\u003epuffy4life\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e \u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://mastodon.bsd.cafe/@stefano\" class=\"u-url mention\"\u003e@\u003cspan\u003estefano\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e jup. Even boosted\u003c/p\u003e"
+        },
+        "attachment": [],
+        "tag": [
+          {
+            "type": "Mention",
+            "href": "https://snac.bsd.cafe/puffy4life",
+            "name": "@puffy4life@snac.bsd.cafe"
+          },
+          {
+            "type": "Mention",
+            "href": "https://mastodon.bsd.cafe/users/stefano",
+            "name": "@stefano@bsd.cafe"
+          }
+        ],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114417249618347005/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114417249618347005/replies?only_other_accounts=true\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114417249618347005/replies",
+            "items": []
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114417249618347005/likes",
+          "type": "Collection",
+          "totalItems": 1
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114417249618347005/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114417044942310897/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-28T18:39:13Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://chaos.social/users/Toasterson/followers",
+        "https://aus.social/users/jimbob"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114417044942310897",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": "https://chaos.social/users/Toasterson/statuses/114417036860733448",
+        "published": "2025-04-28T18:39:13Z",
+        "url": "https://chaos.social/@Toasterson/114417044942310897",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://www.w3.org/ns/activitystreams#Public"
+        ],
+        "cc": [
+          "https://chaos.social/users/Toasterson/followers",
+          "https://aus.social/users/jimbob"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114417044942310897",
+        "inReplyToAtomUri": "https://chaos.social/users/Toasterson/statuses/114417036860733448",
+        "conversation": "tag:aus.social,2025-04-26:objectId=217673242:objectType=Conversation",
+        "content": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://aus.social/@jimbob\" class=\"u-url mention\"\u003e@\u003cspan\u003ejimbob\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e I get quality family time and can still do larger projects where I now not have to do the boring churn work. It\u0026#39;s not a Utotipia but I can use it to code the way I like and win some time back and all of that with local hosting. Thats good for me.\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://aus.social/@jimbob\" class=\"u-url mention\"\u003e@\u003cspan\u003ejimbob\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e I get quality family time and can still do larger projects where I now not have to do the boring churn work. It\u0026#39;s not a Utotipia but I can use it to code the way I like and win some time back and all of that with local hosting. Thats good for me.\u003c/p\u003e"
+        },
+        "attachment": [],
+        "tag": [
+          {
+            "type": "Mention",
+            "href": "https://aus.social/users/jimbob",
+            "name": "@jimbob@aus.social"
+          }
+        ],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114417044942310897/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114417044942310897/replies?only_other_accounts=true\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114417044942310897/replies",
+            "items": []
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114417044942310897/likes",
+          "type": "Collection",
+          "totalItems": 0
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114417044942310897/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114417036860733448/activity",
+      "type": "Create",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-28T18:37:10Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://chaos.social/users/Toasterson/followers",
+        "https://aus.social/users/jimbob"
+      ],
+      "object": {
+        "id": "https://chaos.social/users/Toasterson/statuses/114417036860733448",
+        "type": "Note",
+        "summary": null,
+        "inReplyTo": "https://aus.social/users/jimbob/statuses/114406766000950223",
+        "published": "2025-04-28T18:37:10Z",
+        "url": "https://chaos.social/@Toasterson/114417036860733448",
+        "attributedTo": "https://chaos.social/users/Toasterson",
+        "to": [
+          "https://www.w3.org/ns/activitystreams#Public"
+        ],
+        "cc": [
+          "https://chaos.social/users/Toasterson/followers",
+          "https://aus.social/users/jimbob"
+        ],
+        "sensitive": false,
+        "atomUri": "https://chaos.social/users/Toasterson/statuses/114417036860733448",
+        "inReplyToAtomUri": "https://aus.social/users/jimbob/statuses/114406766000950223",
+        "conversation": "tag:aus.social,2025-04-26:objectId=217673242:objectType=Conversation",
+        "content": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://aus.social/@jimbob\" class=\"u-url mention\"\u003e@\u003cspan\u003ejimbob\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e While that is true with most services. with Jetbrains and MCP servers I see a strong push for self hosting. And that is what motivates me to delegate boring tasks to my own AI enabled Software Infra. The Services are a good start. But I wont use anything else than the free versions. It also saved me a lot of time implementing RFC\u0026#39;s I needed for the software I am making THat would eat days of coding otherwise and are not the fun thing I want to code in my free time.\u003c/p\u003e",
+        "contentMap": {
+          "en": "\u003cp\u003e\u003cspan class=\"h-card\" translate=\"no\"\u003e\u003ca href=\"https://aus.social/@jimbob\" class=\"u-url mention\"\u003e@\u003cspan\u003ejimbob\u003c/span\u003e\u003c/a\u003e\u003c/span\u003e While that is true with most services. with Jetbrains and MCP servers I see a strong push for self hosting. And that is what motivates me to delegate boring tasks to my own AI enabled Software Infra. The Services are a good start. But I wont use anything else than the free versions. It also saved me a lot of time implementing RFC\u0026#39;s I needed for the software I am making THat would eat days of coding otherwise and are not the fun thing I want to code in my free time.\u003c/p\u003e"
+        },
+        "attachment": [],
+        "tag": [
+          {
+            "type": "Mention",
+            "href": "https://aus.social/users/jimbob",
+            "name": "@jimbob@aus.social"
+          }
+        ],
+        "replies": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114417036860733448/replies",
+          "type": "Collection",
+          "first": {
+            "type": "CollectionPage",
+            "next": "https://chaos.social/users/Toasterson/statuses/114417036860733448/replies?min_id=114417044942310897\u0026page=true",
+            "partOf": "https://chaos.social/users/Toasterson/statuses/114417036860733448/replies",
+            "items": [
+              "https://chaos.social/users/Toasterson/statuses/114417044942310897"
+            ]
+          }
+        },
+        "likes": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114417036860733448/likes",
+          "type": "Collection",
+          "totalItems": 0
+        },
+        "shares": {
+          "id": "https://chaos.social/users/Toasterson/statuses/114417036860733448/shares",
+          "type": "Collection",
+          "totalItems": 0
+        }
+      }
+    },
+    {
+      "id": "https://chaos.social/users/Toasterson/statuses/114417025639332298/activity",
+      "type": "Announce",
+      "actor": "https://chaos.social/users/Toasterson",
+      "published": "2025-04-28T18:34:19Z",
+      "to": [
+        "https://www.w3.org/ns/activitystreams#Public"
+      ],
+      "cc": [
+        "https://aus.social/users/jimbob",
+        "https://chaos.social/users/Toasterson/followers"
+      ],
+      "object": "https://aus.social/users/jimbob/statuses/114406766000950223"
+    }
+  ]
+}
