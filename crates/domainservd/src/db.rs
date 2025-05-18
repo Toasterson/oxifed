@@ -81,8 +81,8 @@ impl MongoDB {
         self.db.collection(&format!("{}.outbox", username))
     }
 
-    pub fn activities_collection(&self) -> Collection<oxifed::Activity> {
-        self.db.collection("activities")
+    pub fn activities_collection(&self, username: &str) -> Collection<oxifed::Activity> {
+        self.db.collection(&format!("{}.activities", username))
     }
 
     /// Get profiles collection

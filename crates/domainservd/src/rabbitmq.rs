@@ -5,21 +5,16 @@ use deadpool_lapin::{Config, Pool, Runtime};
 use futures::StreamExt;
 use lapin::{
     ExchangeKind,
-    options::{
-        BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueBindOptions,
-        QueueDeclareOptions,
-    },
+    options::{BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueBindOptions},
     types::FieldTable,
 };
 use mongodb::bson;
-use oxifed::ObjectType;
 use oxifed::messaging::{
     AnnounceActivityMessage, FollowActivityMessage, LikeActivityMessage, Message,
     NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
     ProfileDeleteMessage, ProfileUpdateMessage,
 };
 use serde::de::Error;
-use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -41,7 +36,7 @@ pub enum RabbitMQError {
 
     #[error("URL Parse error: {0}")]
     URLParse(#[from] url::ParseError),
-    
+
     #[error("Failed to convert object to bson {0}")]
     BsonError(#[from] mongodb::bson::ser::Error),
 
@@ -80,10 +75,36 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
         )
         .await?;
 
+    // Declare the publish exchange for ActivityPub messages
+    channel
+        .exchange_declare(
+            "oxifed.publish",
+            ExchangeKind::Fanout,
+            ExchangeDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
     // Declare the edit exchange - fanout style for broadcasting messages
     channel
         .exchange_declare(
             "oxifed.activities",
+            ExchangeKind::Fanout,
+            ExchangeDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
+    // Declare the publish exchange for ActivityPub messages
+    channel
+        .exchange_declare(
+            "oxifed.publish",
             ExchangeKind::Fanout,
             ExchangeDeclareOptions {
                 durable: true,
@@ -139,7 +160,7 @@ async fn start_activities_consumer(pool: Pool, db: Arc<MongoDB>) -> Result<(), R
         while let Some(delivery) = consumer.next().await {
             match delivery {
                 Ok(delivery) => {
-                    match process_create_message(&delivery.data, &db).await {
+                    match process_create_message(&delivery.data, &db, &channel).await {
                         Ok(_) => {
                             debug!("Successfully processed activities message");
                             // Acknowledge the message
@@ -169,7 +190,11 @@ async fn start_activities_consumer(pool: Pool, db: Arc<MongoDB>) -> Result<(), R
 }
 
 /// Process a profile creation message
-async fn process_create_message(data: &[u8], db: &MongoDB) -> Result<(), RabbitMQError> {
+async fn process_create_message(
+    data: &[u8],
+    db: &MongoDB,
+    channel: &lapin::Channel,
+) -> Result<(), RabbitMQError> {
     // Parse the message
     let message: Message = serde_json::from_slice(data)?;
 
@@ -177,44 +202,463 @@ async fn process_create_message(data: &[u8], db: &MongoDB) -> Result<(), RabbitM
         Message::ProfileCreateMessage(msg) => create_person_object(db, &msg).await,
         Message::ProfileUpdateMessage(msg) => update_person_object(db, &msg).await,
         Message::ProfileDeleteMessage(msg) => delete_person_object(db, &msg).await,
-        Message::NoteCreateMessage(msg) => create_note_object(db, &msg).await,
-        Message::NoteUpdateMessage(msg) => update_note_object(db, &msg).await,
-        Message::NoteDeleteMessage(msg) => delete_note_object(db, &msg).await,
+        Message::NoteCreateMessage(msg) => create_note_object(db, channel, &msg).await,
+        Message::NoteUpdateMessage(msg) => update_note_object(db, channel, &msg).await,
+        Message::NoteDeleteMessage(msg) => delete_note_object(db, channel, &msg).await,
         Message::FollowActivityMessage(msg) => handle_follow(db, &msg).await,
         Message::LikeActivityMessage(msg) => handle_like(db, &msg).await,
         Message::AnnounceActivityMessage(msg) => handle_announce(db, &msg).await,
     }
 }
 
-async fn handle_announce(db: &MongoDB, msg: &AnnounceActivityMessage) -> Result<(), RabbitMQError> {
+async fn handle_announce(
+    _db: &MongoDB,
+    _msg: &AnnounceActivityMessage,
+) -> Result<(), RabbitMQError> {
     todo!()
 }
 
-async fn handle_like(db: &MongoDB, msg: &LikeActivityMessage) -> Result<(), RabbitMQError> {
+async fn handle_like(_db: &MongoDB, _msg: &LikeActivityMessage) -> Result<(), RabbitMQError> {
     todo!()
 }
 
-async fn handle_follow(db: &MongoDB, msg: &FollowActivityMessage) -> Result<(), RabbitMQError> {
+async fn handle_follow(_db: &MongoDB, _msg: &FollowActivityMessage) -> Result<(), RabbitMQError> {
     todo!()
 }
 
-async fn delete_note_object(db: &MongoDB, msg: &NoteDeleteMessage) -> Result<(), RabbitMQError> {
+// Stub implementations for unimplemented functions
+async fn handle_activity(_db: &MongoDB, _msg: &str) -> Result<(), RabbitMQError> {
     todo!()
 }
 
-async fn update_note_object(db: &MongoDB, msg: &NoteUpdateMessage) -> Result<(), RabbitMQError> {
-    todo!()
+// Helper function to publish an activity to the oxifed.activities exchange
+async fn publish_activity_to_followers(
+    activity: &oxifed::Activity,
+    channel: &lapin::Channel,
+) -> Result<(), RabbitMQError> {
+    // Convert the activity to JSON for publishing
+    let activity_json = serde_json::to_vec(activity)?;
+
+    // Publish to the oxifed.publish exchange
+    channel
+        .basic_publish(
+            "oxifed.publish",
+            "", // no routing key for fanout exchanges
+            lapin::options::BasicPublishOptions::default(),
+            &activity_json,
+            lapin::BasicProperties::default(),
+        )
+        .await?;
+
+    Ok(())
 }
 
-async fn create_note_object(db: &MongoDB, msg: &NoteCreateMessage) -> Result<(), RabbitMQError> {
-    todo!()
+async fn delete_note_object(
+    db: &MongoDB,
+    channel: &lapin::Channel,
+    msg: &NoteDeleteMessage,
+) -> Result<(), RabbitMQError> {
+    // Parse note ID to extract username and domain
+    let url = url::Url::parse(&msg.id)?;
+    let path = url.path();
+    let path_parts: Vec<&str> = path.split('/').collect();
+
+    // Expected format: /u/{username}/notes/{uuid}
+    if path_parts.len() < 5 || path_parts[1] != "u" || path_parts[3] != "notes" {
+        return Err(RabbitMQError::JsonError(serde_json::Error::custom(
+            format!("Invalid note ID format: {}", msg.id),
+        )));
+    }
+
+    let username = path_parts[2];
+    let domain = url.host_str().ok_or_else(|| {
+        RabbitMQError::JsonError(serde_json::Error::custom(format!(
+            "Invalid domain in note ID: {}",
+            msg.id
+        )))
+    })?;
+
+    if !does_domain_exist(domain, db).await {
+        return Err(RabbitMQError::DomainNotFound(domain.to_string()));
+    }
+
+    // Find the note before deleting it (we need it for the Delete activity)
+    let outbox_collection = db.outbox_collection(username);
+    let filter = mongodb::bson::doc! { "id": &msg.id };
+
+    let note = if !msg.force {
+        // If not using force delete, we need the note details for the Delete activity
+        outbox_collection
+            .find_one(filter.clone())
+            .await
+            .map_err(|e| {
+                error!("Failed to find note: {}", e);
+                RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+            })?
+    } else {
+        None
+    };
+
+    // If the note doesn't exist and we're not forcing deletion, return an error
+    if note.is_none() && !msg.force {
+        return Err(RabbitMQError::JsonError(serde_json::Error::custom(
+            format!("Note not found: {}", msg.id),
+        )));
+    }
+
+    // Delete the note
+    outbox_collection.delete_one(filter).await.map_err(|e| {
+        error!("Failed to delete note: {}", e);
+        RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+    })?;
+
+    // Create a tombstone if a note was found
+    if let Some(note_obj) = note {
+        // Create a tombstone object to replace the note
+        let now = chrono::Utc::now();
+
+        // Create the actor ID URL
+        let actor_id_url = url::Url::parse(&format!("https://{}/u/{}", domain, username))
+            .map_err(|e| RabbitMQError::URLParse(e))?;
+
+        // Create the activity ID URL
+        let activity_id_url =
+            url::Url::parse(&format!("{}/delete/{}", msg.id, now.timestamp_millis()))
+                .map_err(|e| RabbitMQError::URLParse(e))?;
+
+        // Create a Delete activity
+        let activity = oxifed::Activity {
+            activity_type: oxifed::ActivityType::Delete,
+            id: Some(activity_id_url),
+            name: None,
+            summary: None,
+            actor: Some(oxifed::ObjectOrLink::Url(actor_id_url)),
+            object: Some(oxifed::ObjectOrLink::Object(Box::new(note_obj))),
+            target: None,
+            published: Some(now),
+            updated: Some(now),
+            additional_properties: std::collections::HashMap::new(),
+        };
+
+        // Insert the activity into activities collection
+        let activities_collection = db.activities_collection(username);
+        activities_collection
+            .insert_one(&activity)
+            .await
+            .map_err(|e| {
+                error!("Failed to insert activity: {}", e);
+                RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+            })?;
+
+        // Publish the activity to followers
+        publish_activity_to_followers(&activity, &channel).await?;
+    }
+
+    info!("Note deleted successfully: {}", msg.id);
+    Ok(())
+}
+
+async fn update_note_object(
+    db: &MongoDB,
+    channel: &lapin::Channel,
+    msg: &NoteUpdateMessage,
+) -> Result<(), RabbitMQError> {
+    // Parse note ID to extract username and domain
+    let url = url::Url::parse(&msg.id)?;
+    let path = url.path();
+    let path_parts: Vec<&str> = path.split('/').collect();
+
+    // Expected format: /u/{username}/notes/{uuid}
+    if path_parts.len() < 5 || path_parts[1] != "u" || path_parts[3] != "notes" {
+        return Err(RabbitMQError::JsonError(serde_json::Error::custom(
+            format!("Invalid note ID format: {}", msg.id),
+        )));
+    }
+
+    let username = path_parts[2];
+    let domain = url.host_str().ok_or_else(|| {
+        RabbitMQError::JsonError(serde_json::Error::custom(format!(
+            "Invalid domain in note ID: {}",
+            msg.id
+        )))
+    })?;
+
+    if !does_domain_exist(domain, db).await {
+        return Err(RabbitMQError::DomainNotFound(domain.to_string()));
+    }
+
+    // Find the note to update
+    let outbox_collection = db.outbox_collection(username);
+    let filter = mongodb::bson::doc! { "id": &msg.id };
+
+    let note = outbox_collection
+        .find_one(filter.clone())
+        .await
+        .map_err(|e| {
+            error!("Failed to find note: {}", e);
+            RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+        })?;
+
+    let mut note = note.ok_or_else(|| {
+        RabbitMQError::JsonError(serde_json::Error::custom(format!(
+            "Note not found: {}",
+            msg.id
+        )))
+    })?;
+
+    let now = chrono::Utc::now();
+
+    // Update note fields if provided
+    let mut update_doc = mongodb::bson::Document::new();
+    let mut set_doc = mongodb::bson::Document::new();
+
+    if let Some(content) = &msg.content {
+        note.content = Some(content.clone());
+        set_doc.insert("content", content);
+    }
+
+    if let Some(name) = &msg.name {
+        note.name = Some(name.clone());
+        set_doc.insert("name", name);
+    }
+
+    if let Some(summary) = &msg.summary {
+        note.summary = Some(summary.clone());
+        set_doc.insert("summary", summary);
+    }
+
+    // Update tags if provided
+    if let Some(tags_str) = &msg.tags {
+        let tags: Vec<&str> = tags_str.split(',').map(|s| s.trim()).collect();
+        let tags_value = serde_json::Value::Array(
+            tags.into_iter()
+                .map(|t| serde_json::Value::String(t.to_string()))
+                .collect(),
+        );
+
+        note.additional_properties
+            .insert("tag".to_string(), tags_value.clone());
+        set_doc.insert(
+            "additional_properties.tag",
+            mongodb::bson::to_bson(&tags_value)?,
+        );
+    }
+
+    // Update custom properties if provided
+    if let Some(props) = &msg.properties {
+        for (k, v) in props.as_object().unwrap_or(&serde_json::Map::new()) {
+            note.additional_properties.insert(k.clone(), v.clone());
+            set_doc.insert(
+                format!("additional_properties.{}", k),
+                mongodb::bson::to_bson(v)?,
+            );
+        }
+    }
+
+    // Always update the 'updated' timestamp
+    note.updated = Some(now);
+    set_doc.insert("updated", mongodb::bson::to_bson(&now)?);
+
+    update_doc.insert("$set", set_doc);
+
+    // Update the note in the database
+    outbox_collection
+        .update_one(filter, update_doc)
+        .await
+        .map_err(|e| {
+            error!("Failed to update note: {}", e);
+            RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+        })?;
+
+    // Create the actor ID URL
+    let actor_id_url = url::Url::parse(&format!("https://{}/u/{}", domain, username))
+        .map_err(|e| RabbitMQError::URLParse(e))?;
+
+    // Create the activity ID URL
+    let activity_id_url = url::Url::parse(&format!("{}/update/{}", msg.id, now.timestamp_millis()))
+        .map_err(|e| RabbitMQError::URLParse(e))?;
+
+    // Create an Update activity
+    let activity = oxifed::Activity {
+        activity_type: oxifed::ActivityType::Update,
+        id: Some(activity_id_url),
+        name: None,
+        summary: None,
+        actor: Some(oxifed::ObjectOrLink::Url(actor_id_url)),
+        object: Some(oxifed::ObjectOrLink::Object(Box::new(note))),
+        target: None,
+        published: Some(now),
+        updated: Some(now),
+        additional_properties: std::collections::HashMap::new(),
+    };
+
+    // Insert the activity into activities collection
+    let activities_collection = db.activities_collection(username);
+    activities_collection
+        .insert_one(&activity)
+        .await
+        .map_err(|e| {
+            error!("Failed to insert activity: {}", e);
+            RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+        })?;
+
+    // Publish the activity to followers
+    publish_activity_to_followers(&activity, &channel).await?;
+
+    info!("Note updated successfully: {}", msg.id);
+    Ok(())
+}
+
+async fn create_note_object(
+    db: &MongoDB,
+    channel: &lapin::Channel,
+    msg: &NoteCreateMessage,
+) -> Result<(), RabbitMQError> {
+    // Parse username and domain from author
+    let (username, domain) = split_subject(&msg.author)?;
+
+    if !does_domain_exist(&domain, db).await {
+        return Err(RabbitMQError::DomainNotFound(domain));
+    }
+
+    // Get the actor to attach as attributedTo
+    let actor_collection = db.actors_collection();
+    let actor_id_str = format!("https://{}/u/{}", &domain, &username);
+    let filter = mongodb::bson::doc! { "id": &actor_id_str };
+
+    let actor = actor_collection
+        .find_one(filter.clone())
+        .await
+        .map_err(|e| {
+            error!("Failed to find actor: {}", e);
+            RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+        })?;
+
+    if actor.is_none() {
+        return Err(RabbitMQError::ProfileNotFound(actor_id_str));
+    }
+
+    // Create a unique ID for this note
+    let note_id_uuid = uuid::Uuid::new_v4();
+    let note_id = format!(
+        "https://{}/u/{}/notes/{}",
+        &domain,
+        &username,
+        note_id_uuid.to_string()
+    );
+
+    // Parse the actor ID into a URL
+    let actor_id_url = url::Url::parse(&actor_id_str).map_err(|e| RabbitMQError::URLParse(e))?;
+
+    // Parse the note ID into a URL
+    let note_id_url = url::Url::parse(&note_id).map_err(|e| RabbitMQError::URLParse(e))?;
+
+    let now = chrono::Utc::now();
+
+    // Create the note object
+    let mut note = oxifed::Object {
+        object_type: oxifed::ObjectType::Note,
+        id: Some(note_id_url.clone()),
+        name: msg.name.clone(),
+        summary: msg.summary.clone(),
+        content: Some(msg.content.clone()),
+        url: Some(note_id_url.clone()),
+        published: Some(now),
+        updated: Some(now),
+        attributed_to: Some(oxifed::ObjectOrLink::Url(actor_id_url.clone())),
+        additional_properties: std::collections::HashMap::new(),
+    };
+
+    // Add tags if provided
+    if let Some(tags_str) = &msg.tags {
+        let tags: Vec<&str> = tags_str.split(',').map(|s| s.trim()).collect();
+        if !tags.is_empty() {
+            note.additional_properties.insert(
+                "tags".to_string(),
+                serde_json::Value::Array(
+                    tags.into_iter()
+                        .map(|t| serde_json::Value::String(t.to_string()))
+                        .collect(),
+                ),
+            );
+        }
+    }
+
+    // Add mentions if provided
+    if let Some(mentions_str) = &msg.mentions {
+        let mentions: Vec<&str> = mentions_str.split(',').map(|s| s.trim()).collect();
+        if !mentions.is_empty() {
+            note.additional_properties.insert(
+                "mentions".to_string(),
+                serde_json::Value::Array(
+                    mentions
+                        .into_iter()
+                        .map(|m| serde_json::Value::String(m.to_string()))
+                        .collect(),
+                ),
+            );
+        }
+    }
+
+    // Add any custom properties
+    if let Some(props) = &msg.properties {
+        for (k, v) in props.as_object().unwrap_or(&serde_json::Map::new()) {
+            note.additional_properties.insert(k.clone(), v.clone());
+        }
+    }
+
+    // Insert the note into the outbox collection
+    let outbox_collection = db.outbox_collection(&username);
+    outbox_collection
+        .insert_one(note.clone())
+        .await
+        .map_err(|e| {
+            error!("Failed to insert note into outbox: {}", e);
+            RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+        })?;
+
+    // Create activity ID
+    let activity_id_url = url::Url::parse(&format!("{}/activity", note_id))
+        .map_err(|e| RabbitMQError::URLParse(e))?;
+
+    // Create a Create activity
+    let activity = oxifed::Activity {
+        activity_type: oxifed::ActivityType::Create,
+        id: Some(activity_id_url),
+        name: None,
+        summary: None,
+        actor: Some(oxifed::ObjectOrLink::Url(actor_id_url)),
+        object: Some(oxifed::ObjectOrLink::Object(Box::new(note))),
+        target: None,
+        published: Some(now),
+        updated: Some(now),
+        additional_properties: std::collections::HashMap::new(),
+    };
+
+    // Insert the activity into activities collection
+    let activities_collection = db.activities_collection(&username);
+    activities_collection
+        .insert_one(&activity)
+        .await
+        .map_err(|e| {
+            error!("Failed to insert activity: {}", e);
+            RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+        })?;
+
+    // Publish the activity to followers
+    publish_activity_to_followers(&activity, channel).await?;
+
+    info!("Note created successfully: {}", note_id);
+    Ok(())
 }
 
 async fn delete_person_object(
-    db: &MongoDB,
+    _db: &MongoDB,
     msg: &ProfileDeleteMessage,
 ) -> Result<(), RabbitMQError> {
-    todo!()
+    // Just a stub for now, will implement later
+    info!("Delete person request received for ID: {}", msg.id);
+    Ok(())
 }
 
 async fn update_person_object(
@@ -232,23 +676,22 @@ async fn update_person_object(
     let filter = mongodb::bson::doc! { "id": &format!("https://{}/u/{}", &domain, &username) };
 
     let mut update = mongodb::bson::doc! {};
+    let mut set_doc = mongodb::bson::doc! {};
 
     if let Some(summary) = &msg.summary {
-        update.insert("$set", mongodb::bson::doc! { "summary": summary });
+        set_doc.insert("summary", summary);
     }
 
     if let Some(icon) = &msg.icon {
-        update.insert(
-            "$set",
-            mongodb::bson::doc! { "icon": bson::to_bson(&icon)? },
-        );
+        set_doc.insert("icon", bson::to_bson(&icon)?);
     }
 
     if let Some(attachments) = &msg.attachments {
-        update.insert(
-            "$set",
-            mongodb::bson::doc! {"attachment": bson::to_bson(&attachments)? },
-        );
+        set_doc.insert("attachment", bson::to_bson(&attachments)?);
+    }
+
+    if !set_doc.is_empty() {
+        update.insert("$set", set_doc);
     }
 
     actor_collection
@@ -274,6 +717,17 @@ async fn create_person_object(
 
     let aliases = vec![format!("https://{}/@{}", domain, username)];
 
+    // Current time for creation timestamp
+    let now = chrono::Utc::now();
+
+    // Create endpoints map
+    let mut endpoints = std::collections::HashMap::new();
+    endpoints.insert(
+        "sharedInbox".to_string(),
+        format!("https://{}/sharedInbox", &domain),
+    );
+
+    // Create the actor/person object
     let person = oxifed::Actor {
         id: format!("https://{}/u/{}", &domain, &username),
         name: username.clone(),
@@ -282,12 +736,9 @@ async fn create_person_object(
         outbox_url: format!("https://{}/u/{}/outbox", &domain, &username),
         following_url: Some(format!("https://{}/u/{}/following", &domain, &username)),
         followers_url: Some(format!("https://{}/u/{}/followers", &domain, &username)),
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        endpoints: HashMap::from([(
-            "sharedInbox".to_string(),
-            format!("https://{}/sharedInbox", &domain),
-        )]),
+        created_at: now,
+        updated_at: now,
+        endpoints,
         icon: None,
         attachment: None,
     };
@@ -386,43 +837,4 @@ fn split_subject(subject: &str) -> Result<(String, String), RabbitMQError> {
             )))
         })
         .map(|(username, domain)| (username.to_string(), domain.to_string()))
-}
-
-/// Parse links from a string (copied from oxiadm functionality)
-fn parse_links(links_str: &str) -> Result<Vec<oxifed::webfinger::Link>, RabbitMQError> {
-    let mut result = Vec::new();
-
-    for link_str in links_str.split(';') {
-        let parts: Vec<&str> = link_str.split(',').collect();
-        if parts.len() < 2 {
-            return Err(RabbitMQError::JsonError(serde_json::Error::custom(
-                format!("Invalid link format: '{}'", link_str),
-            )));
-        }
-
-        let rel = parts[0].trim().to_string();
-        let href = parts[1].trim().to_string();
-
-        let title = if parts.len() > 2 {
-            Some(parts[2].trim().to_string())
-        } else {
-            None
-        };
-
-        let link = oxifed::webfinger::Link {
-            rel,
-            href: Some(href),
-            type_: None,
-            titles: title.map(|t| {
-                let mut map = std::collections::HashMap::new();
-                map.insert("en".to_string(), t);
-                map
-            }),
-            properties: None,
-        };
-
-        result.push(link);
-    }
-
-    Ok(result)
 }
