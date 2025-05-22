@@ -79,11 +79,7 @@ async fn handle_webfinger(
     }
 
     // Use the full resource as the subject for lookup
-    let subject = query
-        .resource
-        .replace("act:", "")
-        .replace("acct:", "")
-        .clone();
+    let subject = query.resource.replace("act:", "acct:").clone();
 
     // Query MongoDB for the JrdResource
     let profiles_collection = state.db.webfinger_profiles_collection();
