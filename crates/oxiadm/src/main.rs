@@ -50,10 +50,6 @@ enum PersonCommands {
         /// Subject identifier for the person (format: user@domain.org)
         subject: String,
 
-        /// Display name for the person
-        #[arg(long)]
-        name: Option<String>,
-
         /// Bio/summary for the person
         #[arg(long)]
         summary: Option<String>,
@@ -71,10 +67,6 @@ enum PersonCommands {
     Update {
         /// Username or full ActivityPub ID
         id: String,
-
-        /// New display name
-        #[arg(long)]
-        name: Option<String>,
 
         /// New bio/summary
         #[arg(long)]
@@ -112,10 +104,6 @@ enum NoteCommands {
         #[arg(long)]
         content: String,
 
-        /// Optional title for the note
-        #[arg(long)]
-        name: Option<String>,
-
         /// Optional summary for the note
         #[arg(long)]
         summary: Option<String>,
@@ -141,10 +129,6 @@ enum NoteCommands {
         /// New content
         #[arg(long)]
         content: Option<String>,
-
-        /// New title
-        #[arg(long)]
-        name: Option<String>,
 
         /// New summary
         #[arg(long)]
@@ -258,7 +242,6 @@ async fn handle_person_command_messaging(
     match command {
         PersonCommands::Create {
             subject,
-            name,
             summary,
             icon,
             properties,
@@ -280,7 +263,6 @@ async fn handle_person_command_messaging(
             // Create a structured message for Person creation
             let message = oxifed::messaging::ProfileCreateMessage::new(
                 formatted_subject.clone(),
-                name.clone(),
                 summary.clone(),
                 icon.clone(),
                 props,
@@ -301,7 +283,6 @@ async fn handle_person_command_messaging(
 
         PersonCommands::Update {
             id,
-            name,
             summary,
             icon,
             properties,
@@ -320,7 +301,6 @@ async fn handle_person_command_messaging(
             // Create a structured message for Person update
             let message = oxifed::messaging::ProfileUpdateMessage::new(
                 id.clone(),
-                name.clone(),
                 summary.clone(),
                 icon.clone(),
                 props,
@@ -372,7 +352,6 @@ async fn handle_note_command_messaging(
         NoteCommands::Create {
             author,
             content,
-            name,
             summary,
             mentions,
             tags,
@@ -393,7 +372,6 @@ async fn handle_note_command_messaging(
             let message = oxifed::messaging::NoteCreateMessage::new(
                 author.clone(),
                 content.clone(),
-                name.clone(),
                 summary.clone(),
                 mentions.clone(),
                 tags.clone(),
@@ -416,7 +394,6 @@ async fn handle_note_command_messaging(
         NoteCommands::Update {
             id,
             content,
-            name,
             summary,
             tags,
             properties,
@@ -436,7 +413,6 @@ async fn handle_note_command_messaging(
             let message = oxifed::messaging::NoteUpdateMessage::new(
                 id.clone(),
                 content.clone(),
-                name.clone(),
                 summary.clone(),
                 tags.clone(),
                 props,

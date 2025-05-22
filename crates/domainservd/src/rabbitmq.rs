@@ -10,7 +10,7 @@ use lapin::{
 };
 use mongodb::bson;
 use oxifed::messaging::{
-    AnnounceActivityMessage, FollowActivityMessage, LikeActivityMessage, Message,
+    AnnounceActivityMessage, FollowActivityMessage, LikeActivityMessage, MessageEnum,
     NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
     ProfileDeleteMessage, ProfileUpdateMessage,
 };
@@ -196,18 +196,18 @@ async fn process_create_message(
     channel: &lapin::Channel,
 ) -> Result<(), RabbitMQError> {
     // Parse the message
-    let message: Message = serde_json::from_slice(data)?;
+    let message: MessageEnum = serde_json::from_slice(data)?;
 
     match message {
-        Message::ProfileCreateMessage(msg) => create_person_object(db, &msg).await,
-        Message::ProfileUpdateMessage(msg) => update_person_object(db, &msg).await,
-        Message::ProfileDeleteMessage(msg) => delete_person_object(db, &msg).await,
-        Message::NoteCreateMessage(msg) => create_note_object(db, channel, &msg).await,
-        Message::NoteUpdateMessage(msg) => update_note_object(db, channel, &msg).await,
-        Message::NoteDeleteMessage(msg) => delete_note_object(db, channel, &msg).await,
-        Message::FollowActivityMessage(msg) => handle_follow(db, &msg).await,
-        Message::LikeActivityMessage(msg) => handle_like(db, &msg).await,
-        Message::AnnounceActivityMessage(msg) => handle_announce(db, &msg).await,
+        MessageEnum::ProfileCreateMessage(msg) => create_person_object(db, &msg).await,
+        MessageEnum::ProfileUpdateMessage(msg) => update_person_object(db, &msg).await,
+        MessageEnum::ProfileDeleteMessage(msg) => delete_person_object(db, &msg).await,
+        MessageEnum::NoteCreateMessage(msg) => create_note_object(db, channel, &msg).await,
+        MessageEnum::NoteUpdateMessage(msg) => update_note_object(db, channel, &msg).await,
+        MessageEnum::NoteDeleteMessage(msg) => delete_note_object(db, channel, &msg).await,
+        MessageEnum::FollowActivityMessage(msg) => handle_follow(db, &msg).await,
+        MessageEnum::LikeActivityMessage(msg) => handle_like(db, &msg).await,
+        MessageEnum::AnnounceActivityMessage(msg) => handle_announce(db, &msg).await,
     }
 }
 
@@ -417,11 +417,6 @@ async fn update_note_object(
         set_doc.insert("content", content);
     }
 
-    if let Some(name) = &msg.name {
-        note.name = Some(name.clone());
-        set_doc.insert("name", name);
-    }
-
     if let Some(summary) = &msg.summary {
         note.summary = Some(summary.clone());
         set_doc.insert("summary", summary);
@@ -558,8 +553,9 @@ async fn create_note_object(
     // Create the note object
     let mut note = oxifed::Object {
         object_type: oxifed::ObjectType::Note,
+
         id: Some(note_id_url.clone()),
-        name: msg.name.clone(),
+        name: None,
         summary: msg.summary.clone(),
         content: Some(msg.content.clone()),
         url: Some(note_id_url.clone()),

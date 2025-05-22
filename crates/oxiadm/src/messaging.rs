@@ -7,7 +7,6 @@ use lapin::{Connection, ConnectionProperties, options::BasicPublishOptions};
 use miette::{IntoDiagnostic, Result};
 use oxifed::messaging::Message;
 use serde::Serialize;
-use serde_json::Value;
 use thiserror::Error;
 
 /// Messaging-related errors
@@ -32,13 +31,13 @@ impl From<MessagingError> for miette::Error {
     }
 }
 
-/// LavinMQ client for profile operations
+/// LavinMQ client for publishing ActivityPub operations to message broker
 pub struct LavinMQClient {
     connection: Connection,
 }
 
 impl LavinMQClient {
-    /// Create a new LavinMQ client
+    /// Create a new LavinMQ client and initialize exchanges
     pub async fn new(url: &str) -> Result<Self> {
         let connection = Connection::connect(
             url,
@@ -47,6 +46,28 @@ impl LavinMQClient {
         .await
         .into_diagnostic()
         .map_err(|e| miette::miette!("Failed to connect to LavinMQ: {}", e))?;
+
+        // Initialize the oxifed.activities exchange
+        let channel = connection
+            .create_channel()
+            .await
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("Failed to create channel: {}", e))?;
+
+        // Declare the oxifed.activities exchange if it doesn't exist
+        channel
+            .exchange_declare(
+                "oxifed.activities",
+                lapin::ExchangeKind::Fanout,
+                lapin::options::ExchangeDeclareOptions {
+                    durable: true,
+                    ..Default::default()
+                },
+                lapin::types::FieldTable::default(),
+            )
+            .await
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("Failed to declare exchange: {}", e))?;
 
         Ok(Self { connection })
     }
@@ -61,36 +82,11 @@ impl LavinMQClient {
         // Serialize the message to JSON
         let payload = serde_json::to_vec(message)?;
 
-        // Publish the message
+        // Publish the message to the oxifed.publish exchange
         channel
             .basic_publish(
-                "",                    // exchange
+                "oxifed.activities",   // exchange
                 message.routing_key(), // routing key
-                BasicPublishOptions::default(),
-                &payload,
-                AMQPProperties::default(),
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Publish a JSON message (legacy method)
-    pub async fn publish_json_message(
-        &self,
-        routing_key: &str,
-        payload: &Value,
-    ) -> Result<(), MessagingError> {
-        let channel = self.connection.create_channel().await?;
-
-        // Serialize the message to JSON
-        let payload = serde_json::to_vec(payload)?;
-
-        // Publish the message
-        channel
-            .basic_publish(
-                "",          // exchange
-                routing_key, // routing key
                 BasicPublishOptions::default(),
                 &payload,
                 AMQPProperties::default(),
