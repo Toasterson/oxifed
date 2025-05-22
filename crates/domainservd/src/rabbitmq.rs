@@ -380,15 +380,13 @@ async fn update_note_object(
 
     // Find the note to update
     let outbox_collection = db.outbox_collection(username);
-    let filter = mongodb::bson::doc! { "id": &msg.id };
+    let note_id_url = url::Url::parse(&msg.id).map_err(|e| RabbitMQError::URLParse(e))?;
+    let filter = mongodb::bson::doc! { "id": &note_id_url.to_string() };
 
-    let note = outbox_collection
-        .find_one(filter.clone())
-        .await
-        .map_err(|e| {
-            error!("Failed to find note: {}", e);
-            RabbitMQError::DbError(crate::db::DbError::MongoError(e))
-        })?;
+    let note = outbox_collection.find_one(filter.clone()).await.map_err(|e| {
+        error!("Failed to find note: {}", e);
+        RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+    })?;
 
     let mut note = note.ok_or_else(|| {
         RabbitMQError::JsonError(serde_json::Error::custom(format!(
@@ -532,12 +530,29 @@ async fn create_note_object(
         &username,
         note_id_uuid.to_string()
     );
+    
+    // Parse the note ID into a URL
+    let note_id_url = url::Url::parse(&note_id).map_err(|e| RabbitMQError::URLParse(e))?;
+    
+    // Check if a note with this ID already exists
+    let outbox_collection = db.outbox_collection(&username);
+    let existing_note = outbox_collection
+        .find_one(mongodb::bson::doc! { "id": &note_id })
+        .await
+        .map_err(|e| {
+            error!("Failed to check for existing note: {}", e);
+            RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+        })?;
+        
+    if existing_note.is_some() {
+        error!("Note with ID '{}' already exists", note_id);
+        return Err(RabbitMQError::JsonError(serde_json::Error::custom(
+            format!("Note with ID '{}' already exists", note_id)
+        )));
+    }
 
     // Parse the actor ID into a URL
     let actor_id_url = url::Url::parse(&actor_id_str).map_err(|e| RabbitMQError::URLParse(e))?;
-
-    // Parse the note ID into a URL
-    let note_id_url = url::Url::parse(&note_id).map_err(|e| RabbitMQError::URLParse(e))?;
 
     let now = chrono::Utc::now();
 
@@ -595,7 +610,6 @@ async fn create_note_object(
     }
 
     // Insert the note into the outbox collection
-    let outbox_collection = db.outbox_collection(&username);
     outbox_collection
         .insert_one(note.clone())
         .await
@@ -702,6 +716,26 @@ async fn create_person_object(
         return Err(RabbitMQError::DomainNotFound(domain));
     }
 
+    // Create the actor ID and check if it already exists
+    let actor_id = format!("https://{}/u/{}", &domain, &username);
+    let actor_collection = db.actors_collection();
+    
+    // Check if an actor with this ID already exists
+    let existing_actor = actor_collection
+        .find_one(mongodb::bson::doc! { "id": &actor_id })
+        .await
+        .map_err(|e| {
+            error!("Failed to check for existing actor: {}", e);
+            RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+        })?;
+        
+    if existing_actor.is_some() {
+        error!("Actor with ID '{}' already exists", actor_id);
+        return Err(RabbitMQError::JsonError(serde_json::Error::custom(
+            format!("Actor with ID '{}' already exists", actor_id)
+        )));
+    }
+
     let aliases = vec![format!("https://{}/@{}", domain, username)];
 
     // Current time for creation timestamp
@@ -716,7 +750,7 @@ async fn create_person_object(
 
     // Create the actor/person object
     let person = oxifed::Actor {
-        id: format!("https://{}/u/{}", &domain, &username),
+        id: actor_id,
         name: username.clone(),
         domain: domain.clone(),
         inbox_url: format!("https://{}/u/{}/inbox", &domain, &username),
@@ -729,8 +763,6 @@ async fn create_person_object(
         icon: None,
         attachment: None,
     };
-
-    let actor_collection = db.actors_collection();
 
     actor_collection.insert_one(person).await.map_err(|e| {
         error!("Failed to insert actor: {}", e);
@@ -749,14 +781,6 @@ async fn create_webfinger_profile(
     // Format the subject with the appropriate prefix
     let formatted_subject = format_subject(subject);
 
-    // Create a new Webfinger profile
-    let resource = oxifed::webfinger::JrdResource {
-        subject: Some(formatted_subject.clone()),
-        aliases,
-        properties: None,
-        links,
-    };
-
     // Insert into MongoDB
     let jrd_profiles = db.webfinger_profiles_collection();
 
@@ -772,13 +796,18 @@ async fn create_webfinger_profile(
             "Profile with subject '{}' already exists",
             formatted_subject
         );
-        return Err(RabbitMQError::DbError(crate::db::DbError::MongoError(
-            mongodb::error::Error::custom(format!(
-                "Profile with subject '{}' already exists",
-                formatted_subject
-            )),
+        return Err(RabbitMQError::JsonError(serde_json::Error::custom(
+            format!("Profile with subject '{}' already exists", formatted_subject)
         )));
     }
+
+    // Create a new Webfinger profile
+    let resource = oxifed::webfinger::JrdResource {
+        subject: Some(formatted_subject.clone()),
+        aliases,
+        properties: None,
+        links,
+    };
 
     // Insert the new profile
     jrd_profiles.insert_one(resource).await.map_err(|e| {
