@@ -5,7 +5,10 @@ use deadpool_lapin::{Config, Pool, Runtime};
 use futures::StreamExt;
 use lapin::{
     ExchangeKind,
-    options::{BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueBindOptions},
+    options::{
+        BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueBindOptions,
+        QueueDeclareOptions,
+    },
     types::FieldTable,
 };
 use mongodb::bson;
@@ -88,33 +91,21 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
         )
         .await?;
 
-    // Declare the edit exchange - fanout style for broadcasting messages
+    // Declare the activities queue
     channel
-        .exchange_declare(
-            "oxifed.activities",
-            ExchangeKind::Fanout,
-            ExchangeDeclareOptions {
+        .queue_declare(
+            "domainservd.oxifed.activities",
+            QueueDeclareOptions {
                 durable: true,
+                auto_delete: false,
+                exclusive: false,
                 ..Default::default()
             },
             FieldTable::default(),
         )
         .await?;
 
-    // Declare the publish exchange for ActivityPub messages
-    channel
-        .exchange_declare(
-            "oxifed.publish",
-            ExchangeKind::Fanout,
-            ExchangeDeclareOptions {
-                durable: true,
-                ..Default::default()
-            },
-            FieldTable::default(),
-        )
-        .await?;
-
-    // Bind the queue to the edit exchange
+    // Bind the queue to the activities exchange
     channel
         .queue_bind(
             "domainservd.oxifed.activities",
@@ -160,7 +151,7 @@ async fn start_activities_consumer(pool: Pool, db: Arc<MongoDB>) -> Result<(), R
         while let Some(delivery) = consumer.next().await {
             match delivery {
                 Ok(delivery) => {
-                    match process_create_message(&delivery.data, &db, &channel).await {
+                    match process_message(&delivery.data, &db, &channel).await {
                         Ok(_) => {
                             debug!("Successfully processed activities message");
                             // Acknowledge the message
@@ -190,7 +181,7 @@ async fn start_activities_consumer(pool: Pool, db: Arc<MongoDB>) -> Result<(), R
 }
 
 /// Process a profile creation message
-async fn process_create_message(
+async fn process_message(
     data: &[u8],
     db: &MongoDB,
     channel: &lapin::Channel,

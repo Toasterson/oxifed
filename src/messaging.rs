@@ -9,8 +9,7 @@ use serde_json::Value;
 
 /// Message trait that must be implemented by all message types
 pub trait Message {
-    /// Get the routing key for this message type
-    fn routing_key(&self) -> &str;
+    fn to_message(&self) -> MessageEnum;
 }
 
 /// Base enum for all message types
@@ -60,8 +59,8 @@ impl ProfileCreateMessage {
 }
 
 impl Message for ProfileCreateMessage {
-    fn routing_key(&self) -> &str {
-        "oxifed.profile.create"
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::ProfileCreateMessage(self.clone())
     }
 }
 
@@ -104,8 +103,8 @@ impl ProfileUpdateMessage {
 }
 
 impl Message for ProfileUpdateMessage {
-    fn routing_key(&self) -> &str {
-        "oxifed.profile.update"
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::ProfileUpdateMessage(self.clone())
     }
 }
 
@@ -124,8 +123,8 @@ impl ProfileDeleteMessage {
 }
 
 impl Message for ProfileDeleteMessage {
-    fn routing_key(&self) -> &str {
-        "oxifed.profile.delete"
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::ProfileDeleteMessage(self.clone())
     }
 }
 
@@ -166,8 +165,8 @@ impl NoteCreateMessage {
 }
 
 impl Message for NoteCreateMessage {
-    fn routing_key(&self) -> &str {
-        "oxifed.note.create"
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::NoteCreateMessage(self.clone())
     }
 }
 
@@ -205,8 +204,8 @@ impl NoteUpdateMessage {
 }
 
 impl Message for NoteUpdateMessage {
-    fn routing_key(&self) -> &str {
-        "oxifed.note.update"
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::NoteUpdateMessage(self.clone())
     }
 }
 
@@ -225,8 +224,8 @@ impl NoteDeleteMessage {
 }
 
 impl Message for NoteDeleteMessage {
-    fn routing_key(&self) -> &str {
-        "oxifed.note.delete"
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::NoteDeleteMessage(self.clone())
     }
 }
 
@@ -245,8 +244,8 @@ impl FollowActivityMessage {
 }
 
 impl Message for FollowActivityMessage {
-    fn routing_key(&self) -> &str {
-        "oxifed.activity.follow"
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::FollowActivityMessage(self.clone())
     }
 }
 
@@ -265,8 +264,8 @@ impl LikeActivityMessage {
 }
 
 impl Message for LikeActivityMessage {
-    fn routing_key(&self) -> &str {
-        "oxifed.activity.like"
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::LikeActivityMessage(self.clone())
     }
 }
 
@@ -299,32 +298,7 @@ impl AnnounceActivityMessage {
 }
 
 impl Message for AnnounceActivityMessage {
-    fn routing_key(&self) -> &str {
-        "oxifed.activity.announce"
-    }
-}
-
-/// Message for deleting an activity
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActivityDeleteMessage {
-    pub action: String,
-    pub id: String,
-    pub force: bool,
-}
-
-impl ActivityDeleteMessage {
-    /// Create a new activity deletion message
-    pub fn new(id: String, force: bool) -> Self {
-        Self {
-            action: "delete".to_string(),
-            id,
-            force,
-        }
-    }
-}
-
-impl Message for ActivityDeleteMessage {
-    fn routing_key(&self) -> &str {
-        "oxifed.activity.delete"
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::AnnounceActivityMessage(self.clone())
     }
 }

@@ -191,16 +191,6 @@ enum ActivityCommands {
         #[arg(long)]
         cc: Option<String>,
     },
-
-    /// Delete an activity
-    Delete {
-        /// Activity ID
-        id: String,
-
-        /// Skip confirmation prompt
-        #[arg(long)]
-        force: bool,
-    },
 }
 
 #[tokio::main]
@@ -519,26 +509,6 @@ async fn handle_activity_command_messaging(
                 "'Announce' activity request from '{}' for object '{}' sent to message queue",
                 actor, object
             );
-        }
-
-        ActivityCommands::Delete { id, force } => {
-            // Create a structured message for Activity deletion
-            let message = oxifed::messaging::ActivityDeleteMessage::new(id.clone(), *force);
-
-            // Send to LavinMQ
-            client
-                .publish_message(&message)
-                .await
-                .into_diagnostic()
-                .wrap_err("Failed to publish Activity deletion message to LavinMQ")?;
-
-            println!(
-                "Activity deletion request for ID '{}' sent to message queue",
-                id
-            );
-            if *force {
-                println!("Forced deletion requested");
-            }
         }
     }
 

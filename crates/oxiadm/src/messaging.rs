@@ -80,13 +80,13 @@ impl LavinMQClient {
         let channel = self.connection.create_channel().await?;
 
         // Serialize the message to JSON
-        let payload = serde_json::to_vec(message)?;
+        let payload = serde_json::to_vec(&message.to_message())?;
 
         // Publish the message to the oxifed.publish exchange
         channel
             .basic_publish(
-                "oxifed.activities",   // exchange
-                message.routing_key(), // routing key
+                "oxifed.activities", // exchange
+                "",
                 BasicPublishOptions::default(),
                 &payload,
                 AMQPProperties::default(),
