@@ -904,8 +904,10 @@ mod tests {
         let private_key_pem = include_str!("../test-data/ed25519_test_key.pem");
         let public_key_pem = include_str!("../test-data/ed25519_test_public_key.pem");
 
-        // Extract the base64 part from PEM format (between the header and footer lines)
-        let extract_der = |pem: &str| -> Vec<u8> {
+        // Extract keys from PEM format
+        // For signing, ring expects PKCS#8 DER format for private key
+        // For verification, ring expects raw 32-byte public key
+        let extract_pkcs8_private_key = |pem: &str| -> Vec<u8> {
             let lines: Vec<&str> = pem
                 .lines()
                 .filter(|line| !line.starts_with("-----"))
@@ -913,8 +915,18 @@ mod tests {
             BASE64.decode(lines.join("")).unwrap()
         };
 
-        let private_key = extract_der(private_key_pem);
-        let public_key = extract_der(public_key_pem);
+        let extract_ed25519_public_key = |pem: &str| -> Vec<u8> {
+            let lines: Vec<&str> = pem
+                .lines()
+                .filter(|line| !line.starts_with("-----"))
+                .collect();
+            let der = BASE64.decode(lines.join("")).unwrap();
+            // For Ed25519 public key DER format, the actual 32-byte key starts at offset 12
+            der[12..44].to_vec()
+        };
+
+        let private_key = extract_pkcs8_private_key(private_key_pem);
+        let public_key = extract_ed25519_public_key(public_key_pem);
 
         // Create a test request
         let client = Client::new();
