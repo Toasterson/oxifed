@@ -17,9 +17,53 @@ Welcome to the comprehensive documentation for the Oxifed ActivityPub platform. 
 ## 🔧 Component Documentation
 
 ### Core Daemons
-- **[domainservd](crates/domainservd/)** - Central ActivityPub server daemon
+- **[domainservd](crates/domainservd/)** - Central ActivityPub server daemon with domain management
 - **[publisherd](crates/publisherd/)** - ActivityPub publishing and federation service
-- **[oxiadm](crates/oxiadm/README.md)** - Administration and key management CLI tool
+- **[oxiadm](crates/oxiadm/README.md)** - Administration, domain, and key management CLI tool
+
+### Domain Management
+Oxifed implements a comprehensive domain management system that allows hosting multiple domains on a single instance, each with their own configuration, PKI settings, and federation policies.
+
+#### Domain Registration
+Before users can create accounts, administrators must register domains in the system:
+
+```bash
+# Register a new domain with basic configuration
+oxiadm domain create mydomain.com \
+  --name "My Personal Domain" \
+  --description "A personal ActivityPub instance" \
+  --contact-email "admin@mydomain.com" \
+  --registration-mode approval \
+  --authorized-fetch true
+```
+
+#### Domain Configuration
+Each domain supports comprehensive configuration options:
+
+- **Registration Modes**: Open, approval-required, invite-only, or closed
+- **Content Limits**: Maximum note length, file sizes, and allowed file types
+- **Security Settings**: Authorized fetch mode, PKI configuration
+- **Federation Policies**: Custom rules and moderation settings
+- **Custom Properties**: JSON-based extensible configuration
+
+#### Multi-Domain Architecture
+The system supports multiple domains with isolated configurations:
+
+```bash
+# Register multiple domains
+oxiadm domain create personal.example \
+  --registration-mode closed \
+  --max-note-length 280
+
+oxiadm domain create community.example \
+  --registration-mode open \
+  --max-note-length 1000 \
+  --authorized-fetch false
+
+# Each domain operates independently
+oxiadm profile create alice@personal.example
+oxiadm profile create bob@community.example
+```
 
 ## 🔐 Cryptographic Key Management
 
@@ -46,9 +90,19 @@ Master Key (Root of Trust)
 - **Master Signed**: Domain keys signed by master key
 - **Instance Actor**: Server-level system keys
 
-### Quick Start with Key Management
+### Quick Start with Domain and Key Management
 
-1. **Generate or Import Your Key**:
+1. **Register Your Domain**:
+   ```bash
+   # Register domain first
+   oxiadm domain create example.com \
+     --name "Example Community" \
+     --description "A federated social community" \
+     --contact-email "admin@example.com" \
+     --registration-mode approval
+   ```
+
+2. **Generate or Import Your Key**:
    ```bash
    # Generate new key
    oxiadm keys generate --actor alice@example.com --algorithm rsa --key-size 2048
@@ -59,14 +113,14 @@ Master Key (Root of Trust)
      --private-key ./alice_private.pem
    ```
 
-2. **Complete Domain Verification**:
+3. **Complete Domain Verification**:
    ```bash
    oxiadm keys verify --actor alice@example.com --domain example.com
    oxiadm keys verify-complete --actor alice@example.com \
      --domain example.com --challenge-response ./signed_challenge.txt
    ```
 
-3. **Start Federating**:
+4. **Start Federating**:
    ```bash
    oxiadm note create alice@example.com "Hello, federated world! 🌍"
    ```
@@ -81,7 +135,7 @@ Master Key (Root of Trust)
 
 ### For Administrators
 - **Installation Guide**: Setting up your Oxifed instance
-- **Domain Management**: Configuring domains and PKI
+- **Domain Management**: Registering and configuring domains with PKI
 - **User Management**: Account administration and moderation
 - **Federation Setup**: Connecting with other ActivityPub servers
 
@@ -158,10 +212,47 @@ Tested and compatible with:
 - **Web Server**: Nginx or Apache for reverse proxy
 
 ### Deployment Options
-- **Docker Compose**: Single-server deployment
-- **Kubernetes**: Scalable container orchestration
+- **Docker Compose**: Single-server deployment with multi-domain support
+- **Kubernetes**: Scalable container orchestration with domain isolation
 - **Traditional**: Direct installation on Linux servers
-- **Cloud**: AWS, GCP, Azure deployment guides
+- **Cloud**: AWS, GCP, Azure deployment guides with domain management
+
+### Domain Management in Production
+
+#### Domain Lifecycle
+```bash
+# Create domain with production settings
+oxiadm domain create production.social \
+  --name "Production Social" \
+  --contact-email "admin@production.social" \
+  --registration-mode approval \
+  --authorized-fetch true \
+  --max-note-length 500 \
+  --max-file-size 10485760
+
+# Monitor domain status
+oxiadm domain show production.social
+
+# Update domain configuration
+oxiadm domain update production.social \
+  --max-note-length 1000 \
+  --registration-mode invite
+
+# List all registered domains
+oxiadm domain list
+```
+
+#### Domain Migration and Backup
+```bash
+# Export domain configuration
+oxiadm domain show mydomain.com --format json > domain-backup.json
+
+# Domain deletion (with safety checks)
+oxiadm domain delete old-domain.com
+
+# Force deletion (removes all users and content)
+oxiadm domain delete compromised-domain.com --force
+```
 
 ## 🔍 Monitoring and Maintenance
 

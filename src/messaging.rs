@@ -30,6 +30,9 @@ pub enum MessageEnum {
     AnnounceActivityMessage(AnnounceActivityMessage),
     AcceptActivityMessage(AcceptActivityMessage),
     RejectActivityMessage(RejectActivityMessage),
+    DomainCreateMessage(DomainCreateMessage),
+    DomainUpdateMessage(DomainUpdateMessage),
+    DomainDeleteMessage(DomainDeleteMessage),
 }
 
 /// Message format for profile creation requests
@@ -364,5 +367,151 @@ impl RejectActivityMessage {
 impl Message for RejectActivityMessage {
     fn to_message(&self) -> MessageEnum {
         MessageEnum::RejectActivityMessage(self.clone())
+    }
+}
+
+/// Message for creating a domain
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainCreateMessage {
+    pub domain: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contact_email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rules: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registration_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorized_fetch: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_note_length: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_file_size: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_file_types: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<Value>,
+}
+
+impl DomainCreateMessage {
+    /// Create a new domain creation message
+    pub fn new(
+        domain: String,
+        name: Option<String>,
+        description: Option<String>,
+        contact_email: Option<String>,
+        rules: Option<Vec<String>>,
+        registration_mode: Option<String>,
+        authorized_fetch: Option<bool>,
+        max_note_length: Option<i32>,
+        max_file_size: Option<i64>,
+        allowed_file_types: Option<Vec<String>>,
+        properties: Option<Value>,
+    ) -> Self {
+        Self {
+            domain,
+            name,
+            description,
+            contact_email,
+            rules,
+            registration_mode,
+            authorized_fetch,
+            max_note_length,
+            max_file_size,
+            allowed_file_types,
+            properties,
+        }
+    }
+}
+
+impl Message for DomainCreateMessage {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::DomainCreateMessage(self.clone())
+    }
+}
+
+/// Message for updating a domain
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainUpdateMessage {
+    pub domain: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contact_email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rules: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registration_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorized_fetch: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_note_length: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_file_size: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_file_types: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<Value>,
+}
+
+impl DomainUpdateMessage {
+    /// Create a new domain update message
+    pub fn new(
+        domain: String,
+        name: Option<String>,
+        description: Option<String>,
+        contact_email: Option<String>,
+        rules: Option<Vec<String>>,
+        registration_mode: Option<String>,
+        authorized_fetch: Option<bool>,
+        max_note_length: Option<i32>,
+        max_file_size: Option<i64>,
+        allowed_file_types: Option<Vec<String>>,
+        properties: Option<Value>,
+    ) -> Self {
+        Self {
+            domain,
+            name,
+            description,
+            contact_email,
+            rules,
+            registration_mode,
+            authorized_fetch,
+            max_note_length,
+            max_file_size,
+            allowed_file_types,
+            properties,
+        }
+    }
+}
+
+impl Message for DomainUpdateMessage {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::DomainUpdateMessage(self.clone())
+    }
+}
+
+/// Message for deleting a domain
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainDeleteMessage {
+    pub domain: String,
+    pub force: bool,
+}
+
+impl DomainDeleteMessage {
+    /// Create a new domain deletion message
+    pub fn new(domain: String, force: bool) -> Self {
+        Self { domain, force }
+    }
+}
+
+impl Message for DomainDeleteMessage {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::DomainDeleteMessage(self.clone())
     }
 }

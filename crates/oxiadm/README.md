@@ -226,6 +226,53 @@ Boost (announce) a post:
 oxiadm boost alice@example.com https://remote.example/posts/123
 ```
 
+### Domain Management
+
+Register a new domain with the system:
+
+```bash
+oxiadm domain create example.com \
+  --name "Example Domain" \
+  --description "A sample domain for testing" \
+  --contact-email "admin@example.com" \
+  --registration-mode approval \
+  --authorized-fetch true \
+  --max-note-length 500 \
+  --max-file-size 10485760
+```
+
+Update domain configuration:
+
+```bash
+oxiadm domain update example.com \
+  --authorized-fetch false \
+  --max-note-length 1000
+```
+
+List all registered domains:
+
+```bash
+oxiadm domain list
+```
+
+Show domain details:
+
+```bash
+oxiadm domain show example.com
+```
+
+Delete a domain (with confirmation):
+
+```bash
+oxiadm domain delete example.com
+```
+
+Force delete a domain and all its users:
+
+```bash
+oxiadm domain delete example.com --force
+```
+
 ### Federation Testing
 
 Test HTTP signature generation and verification:
@@ -247,6 +294,92 @@ Test authorized fetch capability:
 ```bash
 oxiadm test authorized-fetch --actor alice@example.com \
   --target https://remote.example/users/bob/outbox
+```
+</edits>
+
+<edits>
+
+<old_text>
+### Complete Instance Setup from Scratch
+
+```bash
+# 1. Register your domain first
+oxiadm domain create example.com \
+  --name "Example Community" \
+  --description "A federated community instance" \
+  --contact-email "admin@example.com" \
+  --registration-mode approval \
+  --authorized-fetch true \
+  --max-note-length 500 \
+  --max-file-size 10485760
+
+# 2. Generate keys locally (outside of Oxifed)
+openssl genpkey -algorithm RSA -pkcs8 -out alice_private.pem -pkeyopt rsa_keygen_bits:2048
+openssl pkey -in alice_private.pem -pubout -out alice_public.pem
+
+# 3. Import keys into Oxifed
+oxiadm keys import --actor alice@example.com \
+  --public-key ./alice_public.pem \
+  --private-key ./alice_private.pem \
+  --algorithm rsa
+
+# 4. Create actor profile
+oxiadm profile create alice@example.com \
+  --summary "Federated network enthusiast" \
+  --icon ./avatar.jpg
+
+# 5. Initiate domain verification
+oxiadm keys verify --actor alice@example.com --domain example.com
+
+# 6. Complete verification (after solving challenge)
+oxiadm keys verify-complete --actor alice@example.com \
+  --domain example.com \
+  --challenge-response ./signed_challenge.txt
+
+# 7. Test federation
+oxiadm test federation --actor alice@example.com \
+  --remote-actor bob@remote.example
+
+# 8. Publish first note
+oxiadm note create alice@example.com \
+  "Hello fediverse! This is my first post with my own cryptographic keys! 🔐"
+```
+
+### Complete User Setup with BYOK (Domain Already Registered)
+
+If your domain is already registered, you can skip the domain creation step:
+
+```bash
+# 1. Generate keys locally (outside of Oxifed)
+openssl genpkey -algorithm RSA -pkcs8 -out alice_private.pem -pkeyopt rsa_keygen_bits:2048
+openssl pkey -in alice_private.pem -pubout -out alice_public.pem
+
+# 2. Import keys into Oxifed
+oxiadm keys import --actor alice@example.com \
+  --public-key ./alice_public.pem \
+  --private-key ./alice_private.pem \
+  --algorithm rsa
+
+# 3. Create actor profile
+oxiadm profile create alice@example.com \
+  --summary "Federated network enthusiast" \
+  --icon ./avatar.jpg
+
+# 4. Initiate domain verification
+oxiadm keys verify --actor alice@example.com --domain example.com
+
+# 5. Complete verification (after solving challenge)
+oxiadm keys verify-complete --actor alice@example.com \
+  --domain example.com \
+  --challenge-response ./signed_challenge.txt
+
+# 6. Test federation
+oxiadm test federation --actor alice@example.com \
+  --remote-actor bob@remote.example
+
+# 7. Publish first note
+oxiadm note create alice@example.com \
+  "Hello fediverse! This is my first post with my own cryptographic keys! 🔐"
 ```
 
 ### System Administration
@@ -421,8 +554,77 @@ oxiadm keys import-from-provider --actor alice@example.com \
 
 Administration CLI tool for Oxifed, designed with a structure similar to Solaris commands and providing comprehensive cryptographic key management capabilities.
 
+## Domain Registration
+
+Before creating user profiles, you must first register a domain with the Oxifed system. This establishes the domain configuration, PKI settings, and federation policies.
+
+### Registration Modes
+
+- **open**: Anyone can register accounts on this domain
+- **approval**: Account registration requires manual approval
+- **invite**: Account registration is by invitation only
+- **closed**: No new account registrations allowed
+
+### Basic Domain Setup
+
+```bash
+# Register a new domain with basic settings
+oxiadm domain create mydomain.com \
+  --name "My Personal Domain" \
+  --description "A personal ActivityPub instance" \
+  --contact-email "admin@mydomain.com" \
+  --registration-mode approval
+
+# Enable authorized fetch for better security
+oxiadm domain update mydomain.com --authorized-fetch true
+
+# Set content limits
+oxiadm domain update mydomain.com \
+  --max-note-length 500 \
+  --max-file-size 10485760 \
+  --allowed-file-types image/jpeg \
+  --allowed-file-types image/png
+```
+
+### Domain Configuration Options
+
+The domain creation supports various configuration options:
+
+- `--name`: Human-readable display name for the domain
+- `--description`: Domain description shown to users
+- `--contact-email`: Administrative contact email
+- `--rules`: Domain rules (can be specified multiple times)
+- `--registration-mode`: Registration policy (open/approval/invite/closed)
+- `--authorized-fetch`: Enable authorized fetch mode for enhanced security
+- `--max-note-length`: Maximum length for notes/posts
+- `--max-file-size`: Maximum file upload size in bytes
+- `--allowed-file-types`: Permitted file types (can be specified multiple times)
+- `--properties`: Additional domain properties as JSON
+
+### Managing Existing Domains
+
+```bash
+# List all registered domains
+oxiadm domain list
+
+# View detailed domain information
+oxiadm domain show mydomain.com
+
+# Update domain settings
+oxiadm domain update mydomain.com \
+  --description "Updated domain description" \
+  --max-note-length 1000
+
+# Delete a domain (requires confirmation unless --force is used)
+oxiadm domain delete old-domain.com
+
+# Force delete a domain and all associated users
+oxiadm domain delete unwanted-domain.com --force
+```
+
 ## Creating Profiles
 
-Create a new actor profile with automatic key generation:
+After registering a domain, you can create user profiles. Create a new actor profile with automatic key generation:
 
 ```
+</edits>

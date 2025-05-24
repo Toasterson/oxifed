@@ -15,7 +15,8 @@ use lapin::{
 
 
 use oxifed::messaging::{
-    AcceptActivityMessage, AnnounceActivityMessage, FollowActivityMessage, LikeActivityMessage,
+    AcceptActivityMessage, AnnounceActivityMessage, DomainCreateMessage, DomainDeleteMessage,
+    DomainUpdateMessage, FollowActivityMessage, LikeActivityMessage,
     MessageEnum, NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
     ProfileDeleteMessage, ProfileUpdateMessage, RejectActivityMessage,
 };
@@ -60,6 +61,12 @@ pub enum RabbitMQError {
 
     #[error("Domain not found: {0}")]
     DomainNotFound(String),
+
+    #[error("Constraint error: {0}")]
+    ConstraintError(String),
+
+    #[error("Database error: {0}")]
+    DatabaseError(#[from] oxifed::database::DatabaseError),
 }
 
 /// Create a LavinMQ connection pool
@@ -209,6 +216,9 @@ async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQE
         MessageEnum::AnnounceActivityMessage(msg) => handle_announce(db, &msg).await,
         MessageEnum::AcceptActivityMessage(msg) => handle_accept(db, &msg).await,
         MessageEnum::RejectActivityMessage(msg) => handle_reject(db, &msg).await,
+        MessageEnum::DomainCreateMessage(msg) => create_domain_object(db, &msg).await,
+        MessageEnum::DomainUpdateMessage(msg) => update_domain_object(db, &msg).await,
+        MessageEnum::DomainDeleteMessage(msg) => delete_domain_object(db, &msg).await,
     }
 }
 
@@ -1092,4 +1102,238 @@ fn split_subject(subject: &str) -> Result<(String, String), RabbitMQError> {
             )))
         })
         .map(|(username, domain)| (username.to_string(), domain.to_string()))
+}
+
+/// Create a new domain
+async fn create_domain_object(
+    db: &Arc<MongoDB>,
+    msg: &oxifed::messaging::DomainCreateMessage,
+) -> Result<(), RabbitMQError> {
+    use oxifed::database::{DomainDocument, RegistrationMode, DomainStatus};
+    use chrono::Utc;
+
+    info!("Creating domain: {}", msg.domain);
+
+    // Check if domain already exists
+    let db_manager = oxifed::database::DatabaseManager::new(db.database().clone());
+    if let Ok(Some(_)) = db_manager.find_domain_by_name(&msg.domain).await {
+        warn!("Domain {} already exists", msg.domain);
+        return Err(RabbitMQError::ConstraintError(format!(
+            "Domain {} already exists",
+            msg.domain
+        )));
+    }
+
+    // Parse registration mode
+    let registration_mode = match msg.registration_mode.as_deref() {
+        Some("open") => RegistrationMode::Open,
+        Some("approval") => RegistrationMode::Approval,
+        Some("invite") => RegistrationMode::Invite,
+        Some("closed") => RegistrationMode::Closed,
+        _ => RegistrationMode::Approval, // Default
+    };
+
+    // Create domain document
+    let domain_doc = DomainDocument {
+        id: None,
+        domain: msg.domain.clone(),
+        name: msg.name.clone(),
+        description: msg.description.clone(),
+        contact_email: msg.contact_email.clone(),
+        rules: msg.rules.clone(),
+        registration_mode,
+        authorized_fetch: msg.authorized_fetch.unwrap_or(false),
+        max_note_length: msg.max_note_length,
+        max_file_size: msg.max_file_size,
+        allowed_file_types: msg.allowed_file_types.clone(),
+        domain_key_id: None, // Will be set when domain key is generated
+        config: msg.properties.as_ref().map(|p| {
+            mongodb::bson::to_document(p).unwrap_or_default()
+        }),
+        status: DomainStatus::Active,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+
+    // Insert domain into database
+    match db_manager.insert_domain(domain_doc).await {
+        Ok(id) => {
+            info!("Domain {} created successfully with ID: {}", msg.domain, id);
+        }
+        Err(e) => {
+            error!("Failed to create domain {}: {}", msg.domain, e);
+            return Err(RabbitMQError::DatabaseError(e));
+        }
+    }
+
+    Ok(())
+}
+
+/// Update an existing domain
+async fn update_domain_object(
+    db: &Arc<MongoDB>,
+    msg: &oxifed::messaging::DomainUpdateMessage,
+) -> Result<(), RabbitMQError> {
+    use oxifed::database::RegistrationMode;
+    use mongodb::bson::{doc, Document};
+
+    info!("Updating domain: {}", msg.domain);
+
+    let db_manager = oxifed::database::DatabaseManager::new(db.database().clone());
+
+    // Check if domain exists
+    if db_manager.find_domain_by_name(&msg.domain).await?.is_none() {
+        return Err(RabbitMQError::DomainNotFound(format!(
+            "Domain {} not found",
+            msg.domain
+        )));
+    }
+
+    // Build update document
+    let mut update_doc = Document::new();
+
+    if let Some(name) = &msg.name {
+        update_doc.insert("name", name);
+    }
+    if let Some(description) = &msg.description {
+        update_doc.insert("description", description);
+    }
+    if let Some(contact_email) = &msg.contact_email {
+        update_doc.insert("contact_email", contact_email);
+    }
+    if let Some(rules) = &msg.rules {
+        update_doc.insert("rules", rules);
+    }
+    if let Some(registration_mode) = &msg.registration_mode {
+        let mode = match registration_mode.as_str() {
+            "open" => RegistrationMode::Open,
+            "approval" => RegistrationMode::Approval,
+            "invite" => RegistrationMode::Invite,
+            "closed" => RegistrationMode::Closed,
+            _ => return Err(RabbitMQError::JsonError(serde_json::Error::custom(
+                format!("Invalid registration mode: {}", registration_mode)
+            ))),
+        };
+        update_doc.insert("registration_mode", mongodb::bson::to_bson(&mode).unwrap());
+    }
+    if let Some(authorized_fetch) = msg.authorized_fetch {
+        update_doc.insert("authorized_fetch", authorized_fetch);
+    }
+    if let Some(max_note_length) = msg.max_note_length {
+        update_doc.insert("max_note_length", max_note_length);
+    }
+    if let Some(max_file_size) = msg.max_file_size {
+        update_doc.insert("max_file_size", max_file_size);
+    }
+    if let Some(allowed_file_types) = &msg.allowed_file_types {
+        update_doc.insert("allowed_file_types", allowed_file_types);
+    }
+    if let Some(properties) = &msg.properties {
+        update_doc.insert("config", mongodb::bson::to_document(properties).unwrap_or_default());
+    }
+
+    update_doc.insert("updated_at", mongodb::bson::to_bson(&chrono::Utc::now()).unwrap());
+
+    // Perform update
+    let collection: mongodb::Collection<oxifed::database::DomainDocument> = 
+        db.database().collection("domains");
+    
+    match collection
+        .update_one(doc! { "domain": &msg.domain }, doc! { "$set": update_doc })
+        .await
+    {
+        Ok(result) => {
+            if result.modified_count > 0 {
+                info!("Domain {} updated successfully", msg.domain);
+            } else {
+                warn!("No changes made to domain {}", msg.domain);
+            }
+        }
+        Err(e) => {
+            error!("Failed to update domain {}: {}", msg.domain, e);
+            return Err(RabbitMQError::DatabaseError(
+                oxifed::database::DatabaseError::MongoError(e),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Delete a domain
+async fn delete_domain_object(
+    db: &Arc<MongoDB>,
+    msg: &oxifed::messaging::DomainDeleteMessage,
+) -> Result<(), RabbitMQError> {
+    use mongodb::bson::doc;
+
+    info!("Deleting domain: {} (force: {})", msg.domain, msg.force);
+
+    let db_manager = oxifed::database::DatabaseManager::new(db.database().clone());
+
+    // Check if domain exists
+    if db_manager.find_domain_by_name(&msg.domain).await?.is_none() {
+        return Err(RabbitMQError::DomainNotFound(format!(
+            "Domain {} not found",
+            msg.domain
+        )));
+    }
+
+    // Check if domain has any actors (unless force is true)
+    if !msg.force {
+        let actor_collection: mongodb::Collection<oxifed::database::ActorDocument> = 
+            db.database().collection("actors");
+        
+        let actor_count = actor_collection
+            .count_documents(doc! { "domain": &msg.domain })
+            .await
+            .map_err(|e| RabbitMQError::DatabaseError(
+                oxifed::database::DatabaseError::MongoError(e)
+            ))?;
+
+        if actor_count > 0 {
+            return Err(RabbitMQError::ConstraintError(format!(
+                "Cannot delete domain {} with {} existing actors. Use --force to override.",
+                msg.domain, actor_count
+            )));
+        }
+    }
+
+    // Delete the domain
+    let collection: mongodb::Collection<oxifed::database::DomainDocument> = 
+        db.database().collection("domains");
+    
+    match collection.delete_one(doc! { "domain": &msg.domain }).await {
+        Ok(result) => {
+            if result.deleted_count > 0 {
+                info!("Domain {} deleted successfully", msg.domain);
+                
+                // If force is true, also delete all associated actors
+                if msg.force {
+                    let actor_collection: mongodb::Collection<oxifed::database::ActorDocument> = 
+                        db.database().collection("actors");
+                    
+                    match actor_collection.delete_many(doc! { "domain": &msg.domain }).await {
+                        Ok(actor_result) => {
+                            info!("Deleted {} actors from domain {}", 
+                                actor_result.deleted_count, msg.domain);
+                        }
+                        Err(e) => {
+                            warn!("Failed to delete actors from domain {}: {}", msg.domain, e);
+                        }
+                    }
+                }
+            } else {
+                warn!("Domain {} was not found for deletion", msg.domain);
+            }
+        }
+        Err(e) => {
+            error!("Failed to delete domain {}: {}", msg.domain, e);
+            return Err(RabbitMQError::DatabaseError(
+                oxifed::database::DatabaseError::MongoError(e),
+            ));
+        }
+    }
+
+    Ok(())
 }

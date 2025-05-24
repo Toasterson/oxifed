@@ -36,6 +36,12 @@ A comprehensive, modular ActivityPub platform for building federated social appl
 
 3. **Test with CLI tool:**
    ```bash
+   # Register a domain first
+   cargo run --bin oxiadm -- domain create example.com \
+     --name "Example Domain" \
+     --description "A test domain" \
+     --contact-email "admin@example.com"
+   
    # Create a user profile
    cargo run --bin oxiadm -- profile create alice@example.com --summary "Hello ActivityPub!"
    
@@ -66,6 +72,7 @@ Specialized daemon for ActivityPub protocol compliance:
 
 ### oxiadm
 Command-line administration and testing tool:
+- **Domain Management**: Register and configure domains in the system
 - **Profile Management**: Create and manage actor profiles and metadata
 - **Content Publishing**: Publish notes, articles, and other ActivityPub objects
 - **Social Interactions**: Follow accounts, like posts, and boost content across the federation
@@ -94,4 +101,5 @@ The platform supports multiple application types:
 1. Read the [Design Document](DESIGN.md) for a comprehensive overview
 2. Check the [Technical Architecture](ARCHITECTURE.md) for implementation details
 3. Follow the Quick Start guide above to run your first instance
-4. Use `oxiadm` to create profiles and test federation with existing ActivityPub servers
+4. Register your domain using `oxiadm domain create` before creating user profiles
+5. Use `oxiadm` to create profiles and test federation with existing ActivityPub servers

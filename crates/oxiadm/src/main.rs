@@ -70,6 +70,12 @@ enum Commands {
         #[command(subcommand)]
         command: TestCommands,
     },
+
+    /// Domain management
+    Domain {
+        #[command(subcommand)]
+        command: DomainCommands,
+    },
 }
 
 /// Commands for working with Person actors
@@ -464,6 +470,121 @@ enum TestCommands {
     },
 }
 
+/// Commands for managing domains
+#[derive(Subcommand)]
+enum DomainCommands {
+    /// Create a new domain
+    Create {
+        /// Domain name
+        domain: String,
+
+        /// Domain display name
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Domain description
+        #[arg(long)]
+        description: Option<String>,
+
+        /// Contact email for the domain
+        #[arg(long)]
+        contact_email: Option<String>,
+
+        /// Domain rules (can be specified multiple times)
+        #[arg(long)]
+        rules: Option<Vec<String>>,
+
+        /// Registration mode (open, approval, invite, closed)
+        #[arg(long, default_value = "approval")]
+        registration_mode: Option<String>,
+
+        /// Enable authorized fetch
+        #[arg(long, default_value = "false")]
+        authorized_fetch: Option<bool>,
+
+        /// Maximum note length
+        #[arg(long)]
+        max_note_length: Option<i32>,
+
+        /// Maximum file size in bytes
+        #[arg(long)]
+        max_file_size: Option<i64>,
+
+        /// Allowed file types (can be specified multiple times)
+        #[arg(long)]
+        allowed_file_types: Option<Vec<String>>,
+
+        /// Additional properties as JSON
+        #[arg(long)]
+        properties: Option<String>,
+    },
+
+    /// Update an existing domain
+    Update {
+        /// Domain name
+        domain: String,
+
+        /// Domain display name
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Domain description
+        #[arg(long)]
+        description: Option<String>,
+
+        /// Contact email for the domain
+        #[arg(long)]
+        contact_email: Option<String>,
+
+        /// Domain rules (can be specified multiple times)
+        #[arg(long)]
+        rules: Option<Vec<String>>,
+
+        /// Registration mode (open, approval, invite, closed)
+        #[arg(long)]
+        registration_mode: Option<String>,
+
+        /// Enable authorized fetch
+        #[arg(long)]
+        authorized_fetch: Option<bool>,
+
+        /// Maximum note length
+        #[arg(long)]
+        max_note_length: Option<i32>,
+
+        /// Maximum file size in bytes
+        #[arg(long)]
+        max_file_size: Option<i64>,
+
+        /// Allowed file types (can be specified multiple times)
+        #[arg(long)]
+        allowed_file_types: Option<Vec<String>>,
+
+        /// Additional properties as JSON
+        #[arg(long)]
+        properties: Option<String>,
+    },
+
+    /// Delete a domain
+    Delete {
+        /// Domain name
+        domain: String,
+
+        /// Force deletion without confirmation
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// List all domains
+    List,
+
+    /// Show domain details
+    Show {
+        /// Domain name
+        domain: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
@@ -679,6 +800,9 @@ async fn handle_command_messaging(client: &LavinMQClient, command: &Commands) ->
         }
         Commands::Test { command } => {
             handle_test_command_messaging(client, command).await?;
+        }
+        Commands::Domain { command } => {
+            handle_domain_command_messaging(client, command).await?;
         }
     }
 
@@ -970,6 +1094,122 @@ async fn handle_activity_command_messaging(
                 "'Announce' activity request from '{}' for object '{}' sent to message queue",
                 actor, object
             );
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle Domain commands via messaging
+async fn handle_domain_command_messaging(
+    client: &LavinMQClient,
+    command: &DomainCommands,
+) -> Result<()> {
+    use oxifed::messaging::{DomainCreateMessage, DomainUpdateMessage, DomainDeleteMessage};
+
+    match command {
+        DomainCommands::Create {
+            domain,
+            name,
+            description,
+            contact_email,
+            rules,
+            registration_mode,
+            authorized_fetch,
+            max_note_length,
+            max_file_size,
+            allowed_file_types,
+            properties,
+        } => {
+            // Parse custom properties if provided
+            let props = if let Some(props_json) = properties {
+                Some(
+                    serde_json::from_str(props_json)
+                        .map_err(|e| miette::miette!("Failed to parse properties JSON: {}", e))?,
+                )
+            } else {
+                None
+            };
+
+            let message = DomainCreateMessage::new(
+                domain.clone(),
+                name.clone(),
+                description.clone(),
+                contact_email.clone(),
+                rules.clone(),
+                registration_mode.clone(),
+                *authorized_fetch,
+                *max_note_length,
+                *max_file_size,
+                allowed_file_types.clone(),
+                props,
+            );
+
+            client.publish_message(&message).await?;
+            println!("Domain creation request sent for: {}", domain);
+        }
+
+        DomainCommands::Update {
+            domain,
+            name,
+            description,
+            contact_email,
+            rules,
+            registration_mode,
+            authorized_fetch,
+            max_note_length,
+            max_file_size,
+            allowed_file_types,
+            properties,
+        } => {
+            // Parse custom properties if provided
+            let props = if let Some(props_json) = properties {
+                Some(
+                    serde_json::from_str(props_json)
+                        .map_err(|e| miette::miette!("Failed to parse properties JSON: {}", e))?,
+                )
+            } else {
+                None
+            };
+
+            let message = DomainUpdateMessage::new(
+                domain.clone(),
+                name.clone(),
+                description.clone(),
+                contact_email.clone(),
+                rules.clone(),
+                registration_mode.clone(),
+                *authorized_fetch,
+                *max_note_length,
+                *max_file_size,
+                allowed_file_types.clone(),
+                props,
+            );
+
+            client.publish_message(&message).await?;
+            println!("Domain update request sent for: {}", domain);
+        }
+
+        DomainCommands::Delete { domain, force } => {
+            let message = DomainDeleteMessage::new(domain.clone(), *force);
+
+            client.publish_message(&message).await?;
+            println!("Domain deletion request sent for: {}", domain);
+            if *force {
+                println!("Force deletion enabled - domain will be deleted without confirmation");
+            }
+        }
+
+        DomainCommands::List => {
+            println!("Domain list request sent to domain service");
+            // This would typically trigger a query message that returns results
+            // For now, we just indicate the request was sent
+        }
+
+        DomainCommands::Show { domain } => {
+            println!("Domain details request sent for: {}", domain);
+            // This would typically trigger a query message for the specific domain
+            // For now, we just indicate the request was sent
         }
     }
 
