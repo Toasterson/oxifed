@@ -20,3 +20,4 @@ lapin.workspace = true
 deadpool-lapin.workspace = true
 url = "2.5.4"
 uuid = { version = "1.6", features = ["v4", "serde"] }
+regex = "1.10"

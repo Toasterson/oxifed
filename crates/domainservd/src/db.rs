@@ -2,6 +2,7 @@ use mongodb::{Client, Collection, Database, bson::doc, options::ClientOptions};
 use oxifed::webfinger::JrdResource;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use chrono::{DateTime, Utc};
 
 /// MongoDB-related errors
 #[derive(Error, Debug)]
@@ -24,6 +25,30 @@ pub enum DbError {
 pub struct Domain {
     pub domain: String,
     pub enabled: bool,
+}
+
+/// Record for storing follower relationships
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FollowerRecord {
+    /// The actor ID who is following
+    pub actor_id: String,
+    /// When the follow relationship was established
+    pub followed_at: DateTime<Utc>,
+    /// The actor's inbox URL for delivery
+    pub inbox_url: String,
+    /// Optional shared inbox URL for optimized delivery
+    pub shared_inbox_url: Option<String>,
+}
+
+/// Record for storing following relationships
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FollowingRecord {
+    /// The actor ID being followed
+    pub actor_id: String,
+    /// When the follow relationship was established
+    pub followed_at: DateTime<Utc>,
+    /// Status of the follow (pending, accepted, rejected)
+    pub status: String,
 }
 
 /// MongoDB connection manager
@@ -83,6 +108,16 @@ impl MongoDB {
 
     pub fn activities_collection(&self, username: &str) -> Collection<oxifed::Activity> {
         self.db.collection(&format!("{}.activities", username))
+    }
+
+    /// Get followers collection for an actor
+    pub fn followers_collection(&self, username: &str) -> Collection<FollowerRecord> {
+        self.db.collection(&format!("{}.followers", username))
+    }
+
+    /// Get following collection for an actor
+    pub fn following_collection(&self, username: &str) -> Collection<FollowingRecord> {
+        self.db.collection(&format!("{}.following", username))
     }
 
     /// Get profiles collection

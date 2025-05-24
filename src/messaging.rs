@@ -28,6 +28,8 @@ pub enum MessageEnum {
     FollowActivityMessage(FollowActivityMessage),
     LikeActivityMessage(LikeActivityMessage),
     AnnounceActivityMessage(AnnounceActivityMessage),
+    AcceptActivityMessage(AcceptActivityMessage),
+    RejectActivityMessage(RejectActivityMessage),
 }
 
 /// Message format for profile creation requests
@@ -304,5 +306,63 @@ impl AnnounceActivityMessage {
 impl Message for AnnounceActivityMessage {
     fn to_message(&self) -> MessageEnum {
         MessageEnum::AnnounceActivityMessage(self.clone())
+    }
+}
+
+/// Message for creating an accept activity
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcceptActivityMessage {
+    pub actor: String,
+    pub object: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cc: Option<String>,
+}
+
+impl AcceptActivityMessage {
+    /// Create a new accept activity message
+    pub fn new(actor: String, object: String, to: Option<String>, cc: Option<String>) -> Self {
+        Self {
+            actor,
+            object,
+            to,
+            cc,
+        }
+    }
+}
+
+impl Message for AcceptActivityMessage {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::AcceptActivityMessage(self.clone())
+    }
+}
+
+/// Message for creating a reject activity
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RejectActivityMessage {
+    pub actor: String,
+    pub object: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cc: Option<String>,
+}
+
+impl RejectActivityMessage {
+    /// Create a new reject activity message
+    pub fn new(actor: String, object: String, to: Option<String>, cc: Option<String>) -> Self {
+        Self {
+            actor,
+            object,
+            to,
+            cc,
+        }
+    }
+}
+
+impl Message for RejectActivityMessage {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::RejectActivityMessage(self.clone())
     }
 }

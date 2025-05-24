@@ -4,6 +4,7 @@
 //! including webfinger protocol implementation, according to RFC 7033.
 
 mod db;
+mod delivery;
 mod rabbitmq;
 mod webfinger;
 

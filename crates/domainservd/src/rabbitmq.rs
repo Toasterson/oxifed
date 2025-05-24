@@ -1,6 +1,7 @@
 //! RabbitMQ/LavinMQ connection and message handling
 
 use crate::db::MongoDB;
+
 use deadpool_lapin::{Config, Pool, Runtime};
 use futures::StreamExt;
 use lapin::{
@@ -12,10 +13,11 @@ use lapin::{
     types::FieldTable,
 };
 use mongodb::bson;
+
 use oxifed::messaging::{
-    AnnounceActivityMessage, FollowActivityMessage, LikeActivityMessage, MessageEnum,
-    NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
-    ProfileDeleteMessage, ProfileUpdateMessage,
+    AcceptActivityMessage, AnnounceActivityMessage, FollowActivityMessage, LikeActivityMessage,
+    MessageEnum, NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
+    ProfileDeleteMessage, ProfileUpdateMessage, RejectActivityMessage,
 };
 use oxifed::messaging::{EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INTERNAL_PUBLISH};
 use serde::de::Error;
@@ -47,6 +49,9 @@ pub enum RabbitMQError {
 
     #[error("Failed to convert object to bson {0}")]
     BsonError(#[from] mongodb::bson::ser::Error),
+
+    #[error("Activity Pub Client Error {0}")]
+    ActPubClientError(#[from] oxifed::client::ClientError),
 
     #[error("Profile not found: {0}")]
     ProfileNotFound(String),
@@ -83,7 +88,7 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
         )
         .await?;
 
-    // Declare the publish exchange for ActivityPub messages
+    // Declare the ActivityPub publish exchange for ActivityPub messages
     channel
         .exchange_declare(
             EXCHANGE_ACTIVITYPUB_PUBLISH,
@@ -156,7 +161,7 @@ async fn start_activities_consumer(pool: Pool, db: Arc<MongoDB>) -> Result<(), R
         while let Some(delivery) = consumer.next().await {
             match delivery {
                 Ok(delivery) => {
-                    match process_message(&delivery.data, &db, &channel).await {
+                    match process_message(&delivery.data, &db).await {
                         Ok(_) => {
                             debug!("Successfully processed activities message");
                             // Acknowledge the message
@@ -186,11 +191,7 @@ async fn start_activities_consumer(pool: Pool, db: Arc<MongoDB>) -> Result<(), R
 }
 
 /// Process a profile creation message
-async fn process_message(
-    data: &[u8],
-    db: &MongoDB,
-    channel: &lapin::Channel,
-) -> Result<(), RabbitMQError> {
+async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQError> {
     // Parse the message
     let message: MessageEnum = serde_json::from_slice(data)?;
 
@@ -198,42 +199,282 @@ async fn process_message(
         MessageEnum::ProfileCreateMessage(msg) => create_person_object(db, &msg).await,
         MessageEnum::ProfileUpdateMessage(msg) => update_person_object(db, &msg).await,
         MessageEnum::ProfileDeleteMessage(msg) => delete_person_object(db, &msg).await,
-        MessageEnum::NoteCreateMessage(msg) => create_note_object(db, channel, &msg).await,
-        MessageEnum::NoteUpdateMessage(msg) => update_note_object(db, channel, &msg).await,
-        MessageEnum::NoteDeleteMessage(msg) => delete_note_object(db, channel, &msg).await,
+        MessageEnum::NoteCreateMessage(msg) => create_note_object(db, &msg).await,
+        MessageEnum::NoteUpdateMessage(msg) => update_note_object(db, &msg).await,
+        MessageEnum::NoteDeleteMessage(msg) => delete_note_object(db, &msg).await,
         MessageEnum::FollowActivityMessage(msg) => handle_follow(db, &msg).await,
         MessageEnum::LikeActivityMessage(msg) => handle_like(db, &msg).await,
         MessageEnum::AnnounceActivityMessage(msg) => handle_announce(db, &msg).await,
+        MessageEnum::AcceptActivityMessage(msg) => handle_accept(db, &msg).await,
+        MessageEnum::RejectActivityMessage(msg) => handle_reject(db, &msg).await,
     }
 }
 
+async fn handle_like(_db: &Arc<MongoDB>, _msg: &LikeActivityMessage) -> Result<(), RabbitMQError> {
+    todo!()
+}
+
 async fn handle_announce(
-    _db: &MongoDB,
+    _db: &Arc<MongoDB>,
     _msg: &AnnounceActivityMessage,
 ) -> Result<(), RabbitMQError> {
     todo!()
 }
 
-async fn handle_like(_db: &MongoDB, _msg: &LikeActivityMessage) -> Result<(), RabbitMQError> {
-    todo!()
-}
-
-async fn handle_follow(_db: &MongoDB, _msg: &FollowActivityMessage) -> Result<(), RabbitMQError> {
-    todo!()
-}
-
-// Helper function to publish an activity to the oxifed.activities exchange
-async fn publish_activity_to_followers(
-    activity: &oxifed::Activity,
-    channel: &lapin::Channel,
+async fn handle_accept(
+    _db: &Arc<MongoDB>,
+    _msg: &AcceptActivityMessage,
 ) -> Result<(), RabbitMQError> {
+    todo!()
+}
+
+async fn handle_reject(
+    _db: &Arc<MongoDB>,
+    _msg: &RejectActivityMessage,
+) -> Result<(), RabbitMQError> {
+    todo!()
+}
+
+async fn handle_follow(
+    db: &Arc<MongoDB>,
+    msg: &FollowActivityMessage,
+) -> Result<(), RabbitMQError> {
+    info!(
+        "Processing Follow activity: {} -> {}",
+        msg.actor, msg.object
+    );
+
+    // Parse the object being followed to extract username
+    let (username, domain) = split_subject(&msg.object)?;
+
+    // Verify the domain exists
+    if !does_domain_exist(&domain, db).await {
+        return Err(RabbitMQError::DomainNotFound(
+            "Domain not found".to_string(),
+        ));
+    }
+
+    // Create Follow activity
+    let follow_activity = oxifed::Activity {
+        activity_type: oxifed::ActivityType::Follow,
+        id: Some(
+            url::Url::parse(&format!(
+                "https://{}/activities/{}",
+                domain,
+                uuid::Uuid::new_v4()
+            ))
+            .map_err(RabbitMQError::URLParse)?,
+        ),
+        name: None,
+        summary: Some(format!("{} follows {}", msg.actor, msg.object)),
+        actor: Some(oxifed::ObjectOrLink::Url(
+            url::Url::parse(&msg.actor).map_err(RabbitMQError::URLParse)?,
+        )),
+        object: Some(oxifed::ObjectOrLink::Url(
+            url::Url::parse(&msg.object).map_err(RabbitMQError::URLParse)?,
+        )),
+        target: None,
+        published: Some(chrono::Utc::now()),
+        updated: None,
+        additional_properties: {
+            let mut props = std::collections::HashMap::new();
+            props.insert(
+                "to".to_string(),
+                serde_json::Value::String(msg.object.clone()),
+            );
+            props
+        },
+    };
+
+    // Store the follow activity
+    let activities_collection = db.activities_collection(&username);
+
+    activities_collection
+        .insert_one(&follow_activity)
+        .await
+        .map_err(|e| RabbitMQError::DbError(crate::db::DbError::MongoError(e)))?;
+
+    // Fetch the actor being followed to get their inbox
+    let client = oxifed::client::ActivityPubClient::new()?;
+
+    let object_url = url::Url::parse(&msg.object).map_err(RabbitMQError::URLParse)?;
+    match client.fetch_actor(&object_url).await {
+        Ok(actor) => {
+            // Get the actor's inbox URL
+            if let Some(serde_json::Value::String(inbox_url)) =
+                actor.additional_properties.get("inbox")
+            {
+                let inbox = url::Url::parse(inbox_url).map_err(RabbitMQError::URLParse)?;
+
+                // Send the Follow activity to the target actor's inbox
+                if let Err(e) = client.send_to_inbox(&inbox, &follow_activity).await {
+                    error!(
+                        "Failed to send Follow activity to inbox {}: {}",
+                        inbox_url, e
+                    );
+                } else {
+                    info!("Follow activity sent to {}", inbox_url);
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to fetch actor {}: {}", msg.object, e);
+        }
+    }
+
+    // The actual follower relationship will be established when we receive
+    // an Accept activity in response to this Follow
+
+    info!("Follow activity processed successfully");
+    Ok(())
+}
+
+/// Handle Accept activity (typically in response to a Follow)
+async fn handle_accept_activity(
+    db: &Arc<MongoDB>,
+    activity: &oxifed::Activity,
+) -> Result<(), RabbitMQError> {
+    // Check if this is accepting a Follow activity
+    if let Some(oxifed::ObjectOrLink::Object(follow_obj)) = &activity.object {
+        if follow_obj.object_type == oxifed::ObjectType::Activity {
+            // This is accepting a Follow activity
+            if let Some(follow_actor) = &follow_obj.additional_properties.get("actor") {
+                if let Some(follow_target) = &follow_obj.additional_properties.get("object") {
+                    if let (
+                        serde_json::Value::String(follower_id),
+                        serde_json::Value::String(target_id),
+                    ) = (follow_actor, follow_target)
+                    {
+                        return add_follower_relationship(db, follower_id, target_id).await;
+                    }
+                }
+            }
+        }
+    }
+
+    info!("Accept activity processed (not a follow accept)");
+    Ok(())
+}
+
+/// Add a follower relationship to the database
+async fn add_follower_relationship(
+    db: &Arc<MongoDB>,
+    follower_id: &str,
+    target_id: &str,
+) -> Result<(), RabbitMQError> {
+    // Extract username from target_id
+    let (username, domain) = split_subject(target_id)?;
+
+    // Verify domain exists
+    if !does_domain_exist(&domain, db).await {
+        return Err(RabbitMQError::DomainNotFound(
+            "Domain not found".to_string(),
+        ));
+    }
+
+    // Fetch follower actor to get inbox information
+    let client = oxifed::client::ActivityPubClient::new()?;
+
+    let follower_url = url::Url::parse(follower_id).map_err(RabbitMQError::URLParse)?;
+    let follower_actor = client
+        .fetch_actor(&follower_url)
+        .await
+        .map_err(|_| RabbitMQError::ProfileNotFound("Actor not found".to_string()))?;
+
+    let inbox_url = follower_actor
+        .additional_properties
+        .get("inbox")
+        .and_then(|v| v.as_str())
+        .ok_or(RabbitMQError::ProfileNotFound("No inbox found".to_string()))?;
+
+    let shared_inbox_url = follower_actor
+        .additional_properties
+        .get("endpoints")
+        .and_then(|endpoints| endpoints.get("sharedInbox"))
+        .and_then(|v| v.as_str());
+
+    // Create follower record
+    let follower_record = crate::db::FollowerRecord {
+        actor_id: follower_id.to_string(),
+        followed_at: chrono::Utc::now(),
+        inbox_url: inbox_url.to_string(),
+        shared_inbox_url: shared_inbox_url.map(|s| s.to_string()),
+    };
+
+    // Store in followers collection
+    let followers_collection = db.followers_collection(&username);
+    let follower_doc =
+        bson::to_document(&follower_record).map_err(|e| RabbitMQError::BsonError(e))?;
+
+    // Use upsert to avoid duplicates
+    let filter = bson::doc! { "actor_id": follower_id };
+    let update = bson::doc! { "$set": follower_doc };
+
+    followers_collection
+        .update_one(filter, update)
+        .await
+        .map_err(|e| RabbitMQError::DbError(crate::db::DbError::MongoError(e)))?;
+
+    info!(
+        "Added follower relationship: {} -> {}",
+        follower_id, target_id
+    );
+    Ok(())
+}
+
+/// Remove a follower relationship from the database
+async fn remove_follower_relationship(
+    db: &Arc<MongoDB>,
+    follower_id: &str,
+    target_id: &str,
+) -> Result<(), RabbitMQError> {
+    // Extract username from target_id
+    let (username, domain) = split_subject(target_id)?;
+
+    // Verify domain exists
+    if !does_domain_exist(&domain, db).await {
+        return Err(RabbitMQError::DomainNotFound(
+            "Domain not found".to_string(),
+        ));
+    }
+
+    // Remove from followers collection
+    let followers_collection = db.followers_collection(&username);
+    let filter = bson::doc! { "actor_id": follower_id };
+
+    followers_collection
+        .delete_one(filter)
+        .await
+        .map_err(|e| RabbitMQError::DbError(crate::db::DbError::MongoError(e)))?;
+
+    info!(
+        "Removed follower relationship: {} -> {}",
+        follower_id, target_id
+    );
+    Ok(())
+}
+
+// ActivityPub-compliant delivery to followers according to W3C specification
+async fn publish_activity_to_activitypub_exchange(
+    activity: &oxifed::Activity,
+) -> Result<(), RabbitMQError> {
+    // Get AMQP URL from environment or use default
+    let amqp_url = std::env::var("AMQP_URL")
+        .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672".to_string());
+
+    // Create a standalone connection for publishing
+    let conn =
+        lapin::Connection::connect(&amqp_url, lapin::ConnectionProperties::default()).await?;
+
+    let channel = conn.create_channel().await?;
+
     // Convert the activity to JSON for publishing
     let activity_json = serde_json::to_vec(activity)?;
 
-    // Publish to the oxifed.publish exchange
+    // Publish to the oxifed.activitypub.publish exchange
     channel
         .basic_publish(
-            EXCHANGE_ACTIVITYPUB_PUBLISH,
+            oxifed::messaging::EXCHANGE_ACTIVITYPUB_PUBLISH,
             "", // no routing key for fanout exchanges
             lapin::options::BasicPublishOptions::default(),
             &activity_json,
@@ -241,12 +482,15 @@ async fn publish_activity_to_followers(
         )
         .await?;
 
+    info!(
+        "Activity published to ActivityPub exchange: {:?}",
+        activity.activity_type
+    );
     Ok(())
 }
 
 async fn delete_note_object(
-    db: &MongoDB,
-    channel: &lapin::Channel,
+    db: &Arc<MongoDB>,
     msg: &NoteDeleteMessage,
 ) -> Result<(), RabbitMQError> {
     // Parse note ID to extract username and domain
@@ -269,7 +513,7 @@ async fn delete_note_object(
         )))
     })?;
 
-    if !does_domain_exist(domain, db).await {
+    if !does_domain_exist(&domain, db).await {
         return Err(RabbitMQError::DomainNotFound(domain.to_string()));
     }
 
@@ -341,8 +585,8 @@ async fn delete_note_object(
                 RabbitMQError::DbError(crate::db::DbError::MongoError(e))
             })?;
 
-        // Publish the activity to followers
-        publish_activity_to_followers(&activity, &channel).await?;
+        // Publish the activity to ActivityPub exchange for delivery
+        publish_activity_to_activitypub_exchange(&activity).await?;
     }
 
     info!("Note deleted successfully: {}", msg.id);
@@ -350,8 +594,7 @@ async fn delete_note_object(
 }
 
 async fn update_note_object(
-    db: &MongoDB,
-    channel: &lapin::Channel,
+    db: &Arc<MongoDB>,
     msg: &NoteUpdateMessage,
 ) -> Result<(), RabbitMQError> {
     // Parse note ID to extract username and domain
@@ -374,7 +617,7 @@ async fn update_note_object(
         )))
     })?;
 
-    if !does_domain_exist(domain, db).await {
+    if !does_domain_exist(&domain, db).await {
         return Err(RabbitMQError::DomainNotFound(domain.to_string()));
     }
 
@@ -489,16 +732,15 @@ async fn update_note_object(
             RabbitMQError::DbError(crate::db::DbError::MongoError(e))
         })?;
 
-    // Publish the activity to followers
-    publish_activity_to_followers(&activity, &channel).await?;
+    // Publish the activity to ActivityPub exchange for delivery
+    publish_activity_to_activitypub_exchange(&activity).await?;
 
     info!("Note updated successfully: {}", msg.id);
     Ok(())
 }
 
 async fn create_note_object(
-    db: &MongoDB,
-    channel: &lapin::Channel,
+    db: &Arc<MongoDB>,
     msg: &NoteCreateMessage,
 ) -> Result<(), RabbitMQError> {
     // Parse username and domain from author
@@ -649,15 +891,15 @@ async fn create_note_object(
             RabbitMQError::DbError(crate::db::DbError::MongoError(e))
         })?;
 
-    // Publish the activity to followers
-    publish_activity_to_followers(&activity, channel).await?;
+    // Publish the activity to ActivityPub exchange for delivery
+    publish_activity_to_activitypub_exchange(&activity).await?;
 
     info!("Note created successfully: {}", note_id);
     Ok(())
 }
 
 async fn delete_person_object(
-    _db: &MongoDB,
+    _db: &Arc<MongoDB>,
     msg: &ProfileDeleteMessage,
 ) -> Result<(), RabbitMQError> {
     // Just a stub for now, will implement later
@@ -666,7 +908,7 @@ async fn delete_person_object(
 }
 
 async fn update_person_object(
-    db: &MongoDB,
+    db: &Arc<MongoDB>,
     msg: &ProfileUpdateMessage,
 ) -> Result<(), RabbitMQError> {
     let (username, domain) = split_subject(&msg.subject)?;
@@ -710,7 +952,7 @@ async fn update_person_object(
 }
 
 async fn create_person_object(
-    db: &MongoDB,
+    db: &Arc<MongoDB>,
     message: &ProfileCreateMessage,
 ) -> Result<(), RabbitMQError> {
     let (username, domain) = split_subject(&message.subject)?;
@@ -776,10 +1018,10 @@ async fn create_person_object(
 }
 
 async fn create_webfinger_profile(
-    db: &MongoDB,
+    db: &Arc<MongoDB>,
     subject: &str,
     aliases: Option<Vec<String>>,
-    links: Option<Vec<oxifed::webfinger::Link>>,
+    _links: Option<Vec<oxifed::webfinger::Link>>,
 ) -> Result<(), RabbitMQError> {
     // Format the subject with the appropriate prefix
     let formatted_subject = format_subject(subject);
@@ -812,7 +1054,7 @@ async fn create_webfinger_profile(
         subject: Some(formatted_subject.clone()),
         aliases,
         properties: None,
-        links,
+        links: None,
     };
 
     // Insert the new profile
@@ -839,7 +1081,7 @@ fn format_subject(subject: &str) -> String {
     format!("acct:{}", subject)
 }
 
-async fn does_domain_exist(domain: &str, db: &MongoDB) -> bool {
+async fn does_domain_exist(domain: &str, db: &Arc<MongoDB>) -> bool {
     let domains = db.domains_collection();
     let filter = mongodb::bson::doc! { "dnsName": &domain };
     domains.find_one(filter).await.is_ok_and(|e| e.is_some())
