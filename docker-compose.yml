@@ -26,6 +26,34 @@ services:
       - MONGO_INITDB_ROOT_PASSWORD=password
     restart: unless-stopped
 
+  domainservd:
+    build:
+      context: .
+      dockerfile: docker/domainservd/Dockerfile
+    container_name: domainservd
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongodb
+      - lavinmq
+    environment:
+      - TZ=UTC
+      - RUST_LOG=info
+    restart: unless-stopped
+
+  publisherd:
+    build:
+      context: .
+      dockerfile: docker/publisherd/Dockerfile
+    container_name: publisherd
+    depends_on:
+      - mongodb
+      - lavinmq
+    environment:
+      - TZ=UTC
+      - RUST_LOG=info
+    restart: unless-stopped
+
 volumes:
   lavinmq-data:
     driver: local

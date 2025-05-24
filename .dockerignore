@@ -1,0 +1,44 @@
+# Build artifacts
+target/
+Cargo.lock
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+ARCHITECTURE.md
+DATABASE_UNIFICATION.md
+DESIGN.md
+DOCUMENTATION.md
+HTTP_SIGNATURES.md
+LICENSE
+
+# Test data
+test-data/
+sample-*.json
+
+# Scripts
+*.sh
+
+# Docker
+docker-compose.yml
+Dockerfile*
+.dockerignore
+
+# CI/CD
+.github/
+
+# Other
+webfinger/
