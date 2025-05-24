@@ -11,9 +11,12 @@ use serde_json::Value;
 use std::collections::HashMap;
 use url::Url;
 pub mod client;
+pub mod database;
 pub mod httpsignature;
 pub mod messaging;
+pub mod pki;
 pub mod webfinger;
+pub mod well_known;
 
 /// Represents types of objects in ActivityPub.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

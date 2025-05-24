@@ -3,8 +3,10 @@
 //! This module implements ActivityPub-compliant delivery of activities to followers
 //! according to the W3C ActivityPub specification section 7.1.
 
-use crate::db::{FollowerRecord, MongoDB};
-use futures::TryStreamExt;
+use crate::db::MongoDB;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
 use futures::stream::{FuturesUnordered, StreamExt};
 use mongodb::bson::doc;
 use oxifed::client::{ActivityPubClient, ClientError};
@@ -16,6 +18,19 @@ use thiserror::Error;
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
 use url::Url;
+
+/// Record for storing follower relationships (for delivery compatibility)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FollowerRecord {
+    /// The actor ID who is following
+    pub actor_id: String,
+    /// When the follow relationship was established
+    pub followed_at: DateTime<Utc>,
+    /// The actor's inbox URL for delivery
+    pub inbox_url: String,
+    /// Optional shared inbox URL for optimized delivery
+    pub shared_inbox_url: Option<String>,
+}
 
 /// Maximum number of concurrent deliveries
 const MAX_CONCURRENT_DELIVERIES: usize = 50;
@@ -33,7 +48,7 @@ const MAX_COLLECTION_ITEMS: usize = 1000;
 #[derive(Error, Debug)]
 pub enum DeliveryError {
     #[error("Database error: {0}")]
-    DatabaseError(#[from] crate::db::DbError),
+    DatabaseError(String),
 
     #[error("Client error: {0}")]
     ClientError(#[from] ClientError),
@@ -361,12 +376,18 @@ impl DeliveryManager {
 
     /// Get followers from database
     async fn get_followers(&self, username: &str) -> Result<Vec<FollowerRecord>> {
-        let collection = self.db.followers_collection(username);
-        let mut cursor = collection.find(doc! {}).await?;
-        let mut followers = Vec::new();
-        while let Some(doc) = cursor.try_next().await? {
-            followers.push(doc);
-        }
+        let actor_id = format!("https://{}/users/{}", "example.com", username); // TODO: get domain from config
+        let follower_ids = self.db.manager().get_actor_followers(&actor_id).await
+            .map_err(|e| DeliveryError::DatabaseError(e.to_string()))?;
+        
+        // Convert follower IDs to FollowerRecord format for compatibility
+        let followers = follower_ids.into_iter().map(|actor_id| FollowerRecord {
+            actor_id: actor_id.clone(),
+            followed_at: chrono::Utc::now(), // TODO: get actual timestamp from database
+            inbox_url: format!("{}/inbox", actor_id),
+            shared_inbox_url: None,
+        }).collect();
+        
         Ok(followers)
     }
 

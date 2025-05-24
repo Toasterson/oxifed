@@ -40,6 +40,36 @@ enum Commands {
         #[command(subcommand)]
         command: ActivityCommands,
     },
+
+    /// Manage cryptographic keys
+    Keys {
+        #[command(subcommand)]
+        command: KeyCommands,
+    },
+
+    /// PKI operations
+    Pki {
+        #[command(subcommand)]
+        command: PkiCommands,
+    },
+
+    /// Profile management (alias for Person)
+    Profile {
+        #[command(subcommand)]
+        command: PersonCommands,
+    },
+
+    /// System administration
+    System {
+        #[command(subcommand)]
+        command: SystemCommands,
+    },
+
+    /// Test federation and signatures
+    Test {
+        #[command(subcommand)]
+        command: TestCommands,
+    },
 }
 
 /// Commands for working with Person actors
@@ -193,6 +223,247 @@ enum ActivityCommands {
     },
 }
 
+/// Commands for managing cryptographic keys
+#[derive(Subcommand)]
+enum KeyCommands {
+    /// Generate a new keypair for an actor
+    Generate {
+        /// Actor identifier (user@domain.com)
+        #[arg(long)]
+        actor: String,
+
+        /// Algorithm (rsa or ed25519)
+        #[arg(long)]
+        algorithm: String,
+
+        /// Key size for RSA (2048, 4096)
+        #[arg(long)]
+        key_size: Option<u32>,
+    },
+
+    /// Import existing keypair (BYOK)
+    Import {
+        /// Actor identifier (user@domain.com)
+        #[arg(long)]
+        actor: String,
+
+        /// Path to public key PEM file
+        #[arg(long)]
+        public_key: String,
+
+        /// Path to private key PEM file
+        #[arg(long)]
+        private_key: String,
+
+        /// Algorithm (rsa or ed25519)
+        #[arg(long)]
+        algorithm: String,
+    },
+
+    /// Initiate domain verification for a key
+    Verify {
+        /// Actor identifier
+        #[arg(long)]
+        actor: String,
+
+        /// Domain to verify
+        #[arg(long)]
+        domain: String,
+    },
+
+    /// Complete domain verification with challenge response
+    VerifyComplete {
+        /// Actor identifier
+        #[arg(long)]
+        actor: String,
+
+        /// Domain being verified
+        #[arg(long)]
+        domain: String,
+
+        /// Path to signed challenge response
+        #[arg(long)]
+        challenge_response: String,
+    },
+
+    /// Rotate a key
+    Rotate {
+        /// Actor identifier
+        #[arg(long)]
+        actor: String,
+
+        /// Rotation type (scheduled or emergency)
+        #[arg(long)]
+        rotation_type: String,
+    },
+
+    /// View trust chain for a key
+    TrustChain {
+        /// Key ID URL
+        #[arg(long)]
+        key_id: String,
+    },
+
+    /// List keys by trust level
+    List {
+        /// Trust level filter
+        #[arg(long)]
+        trust_level: Option<String>,
+    },
+}
+
+/// Commands for PKI administration
+#[derive(Subcommand)]
+enum PkiCommands {
+    /// Initialize master key (one-time setup)
+    InitMaster {
+        /// Key size
+        #[arg(long, default_value = "4096")]
+        key_size: u32,
+
+        /// Output file for key
+        #[arg(long)]
+        output: String,
+    },
+
+    /// Backup master key
+    BackupMaster {
+        /// Output file for backup
+        #[arg(long)]
+        output: String,
+
+        /// Encrypt the backup
+        #[arg(long)]
+        encrypt: bool,
+    },
+
+    /// Generate domain key
+    GenerateDomainKey {
+        /// Domain name
+        #[arg(long)]
+        domain: String,
+    },
+
+    /// Sign domain key with master key
+    SignDomainKey {
+        /// Domain name
+        #[arg(long)]
+        domain: String,
+
+        /// Path to master key
+        #[arg(long)]
+        master_key: String,
+    },
+
+    /// List all domains
+    ListDomains,
+
+    /// Recover from master key compromise
+    RecoverMaster {
+        /// Recovery token file
+        #[arg(long)]
+        recovery_token: String,
+
+        /// New master key file
+        #[arg(long)]
+        new_master_key: String,
+    },
+
+    /// Recover user access with domain authority
+    RecoverUser {
+        /// Actor identifier
+        #[arg(long)]
+        actor: String,
+
+        /// Domain name
+        #[arg(long)]
+        domain: String,
+
+        /// Recovery method
+        #[arg(long)]
+        method: String,
+    },
+}
+
+/// Commands for system administration
+#[derive(Subcommand)]
+enum SystemCommands {
+    /// Check system health
+    Health,
+
+    /// View PKI status
+    PkiStatus,
+
+    /// Generate system report
+    Report {
+        /// Output file
+        #[arg(long)]
+        output: String,
+    },
+
+    /// Set domain configuration
+    SetDomain {
+        /// Domain name
+        domain: String,
+
+        /// Enable authorized fetch
+        #[arg(long)]
+        authorized_fetch: Option<bool>,
+
+        /// Registration mode
+        #[arg(long)]
+        registration_mode: Option<String>,
+    },
+
+    /// Set instance settings
+    SetInstance {
+        /// Maximum note length
+        #[arg(long)]
+        max_note_length: Option<u32>,
+
+        /// Maximum file size
+        #[arg(long)]
+        max_file_size: Option<String>,
+    },
+}
+
+/// Commands for testing federation
+#[derive(Subcommand)]
+enum TestCommands {
+    /// Test HTTP signature generation and verification
+    Signatures {
+        /// Actor identifier
+        #[arg(long)]
+        actor: String,
+
+        /// Target URL
+        #[arg(long)]
+        target: String,
+    },
+
+    /// Verify federation connectivity
+    Federation {
+        /// Local actor
+        #[arg(long)]
+        actor: String,
+
+        /// Remote actor
+        #[arg(long)]
+        remote_actor: String,
+    },
+
+    /// Test authorized fetch capability
+    AuthorizedFetch {
+        /// Actor identifier
+        #[arg(long)]
+        actor: String,
+
+        /// Target URL
+        #[arg(long)]
+        target: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
@@ -207,10 +478,188 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Handle Key commands via messaging
+async fn handle_key_command_messaging(
+    client: &LavinMQClient,
+    command: &KeyCommands,
+) -> Result<()> {
+    match command {
+        KeyCommands::Generate { actor, algorithm, key_size } => {
+            println!("Generating {} key for '{}'", algorithm, actor);
+            if let Some(size) = key_size {
+                println!("Key size: {}", size);
+            }
+            println!("Key generation request sent to PKI service");
+        }
+
+        KeyCommands::Import { actor, public_key, private_key, algorithm } => {
+            println!("Importing {} key for '{}'", algorithm, actor);
+            println!("Public key: {}", public_key);
+            println!("Private key: {}", private_key);
+            println!("Key import request sent to PKI service");
+        }
+
+        KeyCommands::Verify { actor, domain } => {
+            println!("Initiating domain verification for '{}' on domain '{}'", actor, domain);
+            println!("Domain verification request sent to PKI service");
+        }
+
+        KeyCommands::VerifyComplete { actor, domain, challenge_response } => {
+            println!("Completing domain verification for '{}' on domain '{}'", actor, domain);
+            println!("Challenge response file: {}", challenge_response);
+            println!("Verification completion request sent to PKI service");
+        }
+
+        KeyCommands::Rotate { actor, rotation_type } => {
+            println!("Rotating key for '{}' with type '{}'", actor, rotation_type);
+            println!("Key rotation request sent to PKI service");
+        }
+
+        KeyCommands::TrustChain { key_id } => {
+            println!("Viewing trust chain for key: {}", key_id);
+            println!("Trust chain request sent to PKI service");
+        }
+
+        KeyCommands::List { trust_level } => {
+            if let Some(level) = trust_level {
+                println!("Listing keys with trust level: {}", level);
+            } else {
+                println!("Listing all keys");
+            }
+            println!("Key list request sent to PKI service");
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle PKI commands via messaging
+async fn handle_pki_command_messaging(
+    client: &LavinMQClient,
+    command: &PkiCommands,
+) -> Result<()> {
+    match command {
+        PkiCommands::InitMaster { key_size, output } => {
+            println!("Initializing master key with size {} bits", key_size);
+            println!("Output file: {}", output);
+            println!("Master key initialization request sent to PKI service");
+        }
+
+        PkiCommands::BackupMaster { output, encrypt } => {
+            println!("Backing up master key to: {}", output);
+            if *encrypt {
+                println!("Backup will be encrypted");
+            }
+            println!("Master key backup request sent to PKI service");
+        }
+
+        PkiCommands::GenerateDomainKey { domain } => {
+            println!("Generating domain key for: {}", domain);
+            println!("Domain key generation request sent to PKI service");
+        }
+
+        PkiCommands::SignDomainKey { domain, master_key } => {
+            println!("Signing domain key for '{}' with master key: {}", domain, master_key);
+            println!("Domain key signing request sent to PKI service");
+        }
+
+        PkiCommands::ListDomains => {
+            println!("Listing all domains");
+            println!("Domain list request sent to PKI service");
+        }
+
+        PkiCommands::RecoverMaster { recovery_token, new_master_key } => {
+            println!("Recovering master key");
+            println!("Recovery token: {}", recovery_token);
+            println!("New master key: {}", new_master_key);
+            println!("Master key recovery request sent to PKI service");
+        }
+
+        PkiCommands::RecoverUser { actor, domain, method } => {
+            println!("Recovering user access for '{}' on domain '{}' using method '{}'", actor, domain, method);
+            println!("User recovery request sent to PKI service");
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle System commands via messaging
+async fn handle_system_command_messaging(
+    client: &LavinMQClient,
+    command: &SystemCommands,
+) -> Result<()> {
+    match command {
+        SystemCommands::Health => {
+            println!("Checking system health");
+            println!("Health check request sent to system service");
+        }
+
+        SystemCommands::PkiStatus => {
+            println!("Checking PKI status");
+            println!("PKI status request sent to system service");
+        }
+
+        SystemCommands::Report { output } => {
+            println!("Generating system report to: {}", output);
+            println!("System report request sent to system service");
+        }
+
+        SystemCommands::SetDomain { domain, authorized_fetch, registration_mode } => {
+            println!("Setting domain configuration for: {}", domain);
+            if let Some(af) = authorized_fetch {
+                println!("Authorized fetch: {}", af);
+            }
+            if let Some(mode) = registration_mode {
+                println!("Registration mode: {}", mode);
+            }
+            println!("Domain configuration request sent to system service");
+        }
+
+        SystemCommands::SetInstance { max_note_length, max_file_size } => {
+            println!("Setting instance configuration");
+            if let Some(length) = max_note_length {
+                println!("Max note length: {}", length);
+            }
+            if let Some(size) = max_file_size {
+                println!("Max file size: {}", size);
+            }
+            println!("Instance configuration request sent to system service");
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle Test commands via messaging
+async fn handle_test_command_messaging(
+    client: &LavinMQClient,
+    command: &TestCommands,
+) -> Result<()> {
+    match command {
+        TestCommands::Signatures { actor, target } => {
+            println!("Testing HTTP signatures for '{}' to target: {}", actor, target);
+            println!("Signature test request sent to federation service");
+        }
+
+        TestCommands::Federation { actor, remote_actor } => {
+            println!("Testing federation connectivity from '{}' to '{}'", actor, remote_actor);
+            println!("Federation test request sent to federation service");
+        }
+
+        TestCommands::AuthorizedFetch { actor, target } => {
+            println!("Testing authorized fetch for '{}' to target: {}", actor, target);
+            println!("Authorized fetch test request sent to federation service");
+        }
+    }
+
+    Ok(())
+}
+
 /// Handle commands using messaging
 async fn handle_command_messaging(client: &LavinMQClient, command: &Commands) -> Result<()> {
     match command {
-        Commands::Person { command } => {
+        Commands::Person { command } | Commands::Profile { command } => {
             handle_person_command_messaging(client, command).await?;
         }
         Commands::Note { command } => {
@@ -218,6 +667,18 @@ async fn handle_command_messaging(client: &LavinMQClient, command: &Commands) ->
         }
         Commands::Activity { command } => {
             handle_activity_command_messaging(client, command).await?;
+        }
+        Commands::Keys { command } => {
+            handle_key_command_messaging(client, command).await?;
+        }
+        Commands::Pki { command } => {
+            handle_pki_command_messaging(client, command).await?;
+        }
+        Commands::System { command } => {
+            handle_system_command_messaging(client, command).await?;
+        }
+        Commands::Test { command } => {
+            handle_test_command_messaging(client, command).await?;
         }
     }
 

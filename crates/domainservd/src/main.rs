@@ -3,6 +3,7 @@
 //! This service is responsible for handling domain-specific operations,
 //! including webfinger protocol implementation, according to RFC 7033.
 
+mod activitypub;
 mod db;
 mod delivery;
 mod rabbitmq;
@@ -10,6 +11,8 @@ mod webfinger;
 
 use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
 use db::MongoDB;
+use oxifed::database::DatabaseManager;
+use oxifed::pki::PkiManager;
 use std::io;
 use std::sync::Arc;
 use thiserror::Error;
@@ -45,6 +48,10 @@ pub enum DomainservdError {
     /// RabbitMQ/LavinMQ error
     #[error("RabbitMQ error: {0}")]
     RabbitMQError(#[from] rabbitmq::RabbitMQError),
+
+    /// External database error
+    #[error("External database error: {0}")]
+    DatabaseError(#[from] oxifed::database::DatabaseError),
 }
 
 async fn health_check() -> impl IntoResponse {
@@ -90,6 +97,13 @@ async fn main() -> Result<(), DomainservdError> {
 
     // Start message consumer in a separate task
     rabbitmq::start_consumers(mq_pool, db.clone()).await?;
+
+    // Create database manager
+    let db_manager = Arc::new(DatabaseManager::new(db.database().clone()));
+    db_manager.initialize().await?;
+
+    // Create PKI manager (in a real implementation, this would load existing keys)
+    let pki_manager = Arc::new(PkiManager::new());
 
     let app = Router::new()
         .route("/health", get(health_check))

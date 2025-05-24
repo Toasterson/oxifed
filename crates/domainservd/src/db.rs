@@ -1,127 +1,110 @@
-use mongodb::{Client, Collection, Database, bson::doc, options::ClientOptions};
-use oxifed::webfinger::JrdResource;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use chrono::{DateTime, Utc};
+//! Database module for domainservd
+//!
+//! Provides a clean interface to the comprehensive database implementation.
 
-/// MongoDB-related errors
+use oxifed::database::{DatabaseManager, DatabaseError, ActorDocument, ObjectDocument};
+use oxifed::webfinger::JrdResource;
+use mongodb::Database;
+use std::sync::Arc;
+use thiserror::Error;
+
+/// Database errors for domainservd
 #[derive(Error, Debug)]
 pub enum DbError {
-    /// MongoDB error
-    #[error("MongoDB error: {0}")]
-    MongoError(#[from] mongodb::error::Error),
-
-    /// Serialization error
-    #[error("Serialization error: {0}")]
-    SerializationError(#[from] mongodb::bson::ser::Error),
-
-    /// Deserialization error
-    #[error("Deserialization error: {0}")]
-    DeserializationError(#[from] mongodb::bson::de::Error),
+    #[error("Database operation failed: {0}")]
+    DatabaseError(#[from] DatabaseError),
 }
 
-/// Domain record for storing domain configuration
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Domain {
-    pub domain: String,
-    pub enabled: bool,
-}
-
-/// Record for storing follower relationships
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FollowerRecord {
-    /// The actor ID who is following
-    pub actor_id: String,
-    /// When the follow relationship was established
-    pub followed_at: DateTime<Utc>,
-    /// The actor's inbox URL for delivery
-    pub inbox_url: String,
-    /// Optional shared inbox URL for optimized delivery
-    pub shared_inbox_url: Option<String>,
-}
-
-/// Record for storing following relationships
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FollowingRecord {
-    /// The actor ID being followed
-    pub actor_id: String,
-    /// When the follow relationship was established
-    pub followed_at: DateTime<Utc>,
-    /// Status of the follow (pending, accepted, rejected)
-    pub status: String,
-}
-
-/// MongoDB connection manager
+/// Database connection manager for domainservd
 pub struct MongoDB {
-    #[allow(dead_code)]
-    client: Client,
-    db: Database,
+    manager: Arc<DatabaseManager>,
+    database: Database,
 }
 
 impl MongoDB {
     /// Create a new MongoDB connection
     pub async fn new(connection_string: &str, db_name: &str) -> Result<Self, DbError> {
-        let client_options = ClientOptions::parse(connection_string).await?;
-        let client = Client::with_options(client_options)?;
-        let db = client.database(db_name);
+        use mongodb::{Client, options::ClientOptions};
+        
+        let client_options = ClientOptions::parse(connection_string).await
+            .map_err(|e| DbError::DatabaseError(DatabaseError::MongoError(e)))?;
+        let client = Client::with_options(client_options)
+            .map_err(|e| DbError::DatabaseError(DatabaseError::MongoError(e)))?;
+        let database = client.database(db_name);
 
-        Ok(Self { client, db })
+        let manager = Arc::new(DatabaseManager::new(database.clone()));
+
+        Ok(Self { 
+            manager,
+            database,
+        })
     }
 
-    /// Initialize collections
+    /// Get the database manager
+    pub fn manager(&self) -> &DatabaseManager {
+        &self.manager
+    }
+
+    /// Get the raw database instance
+    pub fn database(&self) -> &Database {
+        &self.database
+    }
+
+    /// Initialize collections and indexes
     pub async fn init_collections(&self) -> Result<(), DbError> {
-        tracing::info!("Initializing MongoDB collections");
-
-        // Check if collections exist, create them if they don't
-        let collection_names = self.db.list_collection_names().await?;
-
-        if !collection_names.contains(&"domains".to_string()) {
-            tracing::info!("Creating 'domains' collection");
-            self.db.create_collection("domains").await?;
-        }
-
-        if !collection_names.contains(&"actors".to_string()) {
-            tracing::info!("Creating 'actors' collection");
-            self.db.create_collection("actors").await?;
-        }
-
-        if !collection_names.contains(&"profiles".to_string()) {
-            tracing::info!("Creating 'profiles' collection");
-            self.db.create_collection("profiles").await?;
-        }
-
-        tracing::info!("MongoDB collections initialized successfully");
+        self.manager.initialize().await?;
         Ok(())
     }
 
-    pub fn domains_collection(&self) -> Collection<Domain> {
-        self.db.collection("domains")
+    /// Find actor by username and domain
+    pub async fn find_actor_by_username(&self, username: &str, domain: &str) -> Result<Option<ActorDocument>, DbError> {
+        self.manager.find_actor_by_username(username, domain).await.map_err(Into::into)
     }
 
-    pub fn actors_collection(&self) -> Collection<oxifed::Actor> {
-        self.db.collection("actors")
+    /// Find actor by ID
+    pub async fn find_actor_by_id(&self, actor_id: &str) -> Result<Option<ActorDocument>, DbError> {
+        self.manager.find_actor_by_id(actor_id).await.map_err(Into::into)
     }
 
-    pub fn outbox_collection(&self, username: &str) -> Collection<oxifed::Object> {
-        self.db.collection(&format!("{}.outbox", username))
+    /// Insert new actor
+    pub async fn insert_actor(&self, actor: ActorDocument) -> Result<mongodb::bson::oid::ObjectId, DbError> {
+        self.manager.insert_actor(actor).await.map_err(Into::into)
     }
 
-    pub fn activities_collection(&self, username: &str) -> Collection<oxifed::Activity> {
-        self.db.collection(&format!("{}.activities", username))
+    /// Get actor's followers
+    pub async fn get_actor_followers(&self, actor_id: &str) -> Result<Vec<String>, DbError> {
+        self.manager.get_actor_followers(actor_id).await.map_err(Into::into)
     }
 
-    /// Get followers collection for an actor
-    pub fn followers_collection(&self, username: &str) -> Collection<FollowerRecord> {
-        self.db.collection(&format!("{}.followers", username))
+    /// Get actor's following
+    pub async fn get_actor_following(&self, actor_id: &str) -> Result<Vec<String>, DbError> {
+        self.manager.get_actor_following(actor_id).await.map_err(Into::into)
     }
 
-    /// Get following collection for an actor
-    pub fn following_collection(&self, username: &str) -> Collection<FollowingRecord> {
-        self.db.collection(&format!("{}.following", username))
+    /// Get actor's outbox
+    pub async fn get_actor_outbox(&self, actor_id: &str, limit: i64, offset: i64) -> Result<Vec<ObjectDocument>, DbError> {
+        self.manager.find_objects_by_actor(actor_id, limit, offset).await.map_err(Into::into)
     }
 
-    /// Get profiles collection
-    pub fn webfinger_profiles_collection(&self) -> Collection<JrdResource> {
-        self.db.collection("webfinger_profiles")
+    /// Get WebFinger profiles collection (for specific domainservd functionality)
+    pub fn webfinger_profiles_collection(&self) -> mongodb::Collection<JrdResource> {
+        self.database.collection("webfinger_profiles")
+    }
+
+    /// Get actor's activities (for legacy compatibility)
+    pub async fn get_actor_activities(&self, actor_id: &str, limit: i64, offset: i64) -> Result<Vec<oxifed::database::ActivityDocument>, DbError> {
+        self.manager.find_activities_by_actor(actor_id, limit, offset).await.map_err(Into::into)
+    }
+
+    /// Count objects for an actor
+    pub async fn count_actor_objects(&self, actor_id: &str) -> Result<u64, DbError> {
+        self.manager.count_objects_by_actor(actor_id).await.map_err(Into::into)
+    }
+
+    /// Update actor statistics
+    pub async fn update_actor_stats(&self, actor_id: &str, followers_count: Option<i64>, following_count: Option<i64>, statuses_count: Option<i64>) -> Result<(), DbError> {
+        self.manager.update_actor_counts(actor_id, followers_count, following_count, statuses_count)
+            .await?;
+        Ok(())
     }
 }
