@@ -1,18 +1,97 @@
-# Oxifed Activitypub daemons
+# Oxifed ActivityPub Platform
 
-This repo contains the Daemons for serving domains on the Activitypub network.
-It is based on the following components.
+A comprehensive, modular ActivityPub platform for building federated social applications including microblogging, long-form blogging, and personal portfolio sites.
 
-The main crate contains Message types and Cleint
+## 📚 Documentation
 
-# Domainservd
-This daemon serves the inbox, webfinger and Outbox Endpoints it is the main daemon external services connect to.
-It is also the daemon any internal app connects to. Internal Apps can Publish Objects as actors or for Actors. Actors are linked to domains all
-of that is saved to mongodb. RabbitMQ is used as the communication channel for all the internal messages. Both for domainservd to receive
-Objects and People or actors but also for domainservd to contact its workers. Everytime a message is sent to a actors inbox or to the shared inbox it is sent to the `INCOMMING_EXCHANGE` where it can be analyzed and potentially filtered by worker daemons. If a Message is received which gets identified as answer to a action performed by a domainservd daemon then domainservd processes this message itself.
+- **[Design Document](DESIGN.md)** - Complete platform architecture and feature specifications
+- **[Technical Architecture](ARCHITECTURE.md)** - Detailed implementation specifications and system design
 
-# Publisherd
-This listens for Activities on the `EXCHANGE_ACTIVITYPUB_PUBLISH` channel and handles all the complicated activitypub publishing logic defined in https://www.w3.org/TR/activitypub/
+## 🚀 Quick Start
 
-# Oxiadm
-A small cli to publish notes and create and administrate people records. With it you can also follow other activitypub accounts and like or boost notes. Its a tiny CLI app to allow for basic smoke testing of the whole system when it's connected to the internet and start interaction with other Activitypub servers. It cannot display any notes or Objects as that is outside of it's scope.
+### Prerequisites
+- Rust 1.70+
+- Docker & Docker Compose
+- MongoDB 6.0+
+- RabbitMQ 3.11+
+
+### Running the Platform
+
+1. **Start infrastructure services:**
+   ```bash
+   docker-compose up -d mongodb lavinmq
+   ```
+
+2. **Build and run the core daemons:**
+   ```bash
+   # Build all components
+   cargo build --release
+   
+   # Run domainservd (in one terminal)
+   cargo run --bin domainservd
+   
+   # Run publisherd (in another terminal)  
+   cargo run --bin publisherd
+   ```
+
+3. **Test with CLI tool:**
+   ```bash
+   # Create a user profile
+   cargo run --bin oxiadm -- profile create alice@example.com --summary "Hello ActivityPub!"
+   
+   # Publish a note
+   cargo run --bin oxiadm -- note create alice@example.com "Hello, federated world!"
+   ```
+
+## 🏗️ Core Components
+
+The platform consists of three main daemons that work together to provide ActivityPub functionality:
+
+### domainservd
+The central ActivityPub server daemon that handles:
+- **Inbox/Outbox APIs**: Serves ActivityPub endpoints for receiving and sending activities
+- **WebFinger Protocol**: Enables actor discovery across the federation
+- **Actor Management**: CRUD operations for user profiles and actor metadata
+- **Multi-domain Support**: Hosts multiple domains with isolated configurations
+- **Message Routing**: Distributes incoming activities to worker daemons via RabbitMQ
+
+All external ActivityPub servers connect to domainservd, and it serves as the main entry point for internal applications. When messages are received at actor inboxes or the shared inbox, they are routed to the `INCOMING_EXCHANGE` for processing by specialized worker daemons.
+
+### publisherd
+Specialized daemon for ActivityPub protocol compliance:
+- **Activity Processing**: Listens on `EXCHANGE_ACTIVITYPUB_PUBLISH` for outgoing activities
+- **Federation Logic**: Implements the complete ActivityPub specification from [W3C ActivityPub](https://www.w3.org/TR/activitypub/)
+- **Delivery Management**: Handles reliable message delivery to remote ActivityPub servers
+- **Protocol Compliance**: Ensures all outgoing activities meet ActivityPub standards
+
+### oxiadm
+Command-line administration and testing tool:
+- **Profile Management**: Create and manage actor profiles and metadata
+- **Content Publishing**: Publish notes, articles, and other ActivityPub objects
+- **Social Interactions**: Follow accounts, like posts, and boost content across the federation
+- **System Testing**: Provides smoke testing capabilities for federation connectivity
+- **Administration**: Domain configuration and system management utilities
+
+*Note: oxiadm is designed for administration and testing - it does not include content viewing capabilities.*
+
+## 🛠️ Applications Built on Oxifed
+
+The platform supports multiple application types:
+
+- **📱 Microblogging App**: Twitter/Mastodon-style short-form content sharing
+- **📝 Blog Platform**: Medium/Ghost-style long-form article publishing  
+- **💼 Portfolio Sites**: Professional portfolio and networking platform
+- **🔧 Custom Apps**: Extensible architecture for custom ActivityPub applications
+
+## 🗄️ Infrastructure
+
+- **Database**: MongoDB for actor profiles, activities, and domain configuration
+- **Message Queue**: RabbitMQ for inter-service communication and activity processing
+- **Federation**: Full ActivityPub protocol support for interoperability with Mastodon, Pleroma, PeerTube, and other platforms
+
+## 📖 Getting Started
+
+1. Read the [Design Document](DESIGN.md) for a comprehensive overview
+2. Check the [Technical Architecture](ARCHITECTURE.md) for implementation details
+3. Follow the Quick Start guide above to run your first instance
+4. Use `oxiadm` to create profiles and test federation with existing ActivityPub servers
