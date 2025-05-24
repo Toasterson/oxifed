@@ -2,17 +2,20 @@
 //!
 //! This module handles the communication with LavinMQ for the oxiadm tool
 
-use lapin::protocol::basic::AMQPProperties;
-use lapin::{Connection, ConnectionProperties, options::{BasicPublishOptions, BasicConsumeOptions, QueueDeclareOptions}};
-use miette::{IntoDiagnostic, Result};
-use oxifed::messaging::{EXCHANGE_INTERNAL_PUBLISH, EXCHANGE_RPC_REQUEST};
-use oxifed::messaging::{Message, DomainRpcRequest, DomainRpcResponse, MessageEnum};
-use serde::Serialize;
-use thiserror::Error;
-use tokio::time::{timeout, Duration};
 use futures::StreamExt;
-use uuid::Uuid;
+use lapin::protocol::basic::AMQPProperties;
+use lapin::{
+    Connection, ConnectionProperties,
+    options::{BasicConsumeOptions, BasicPublishOptions, QueueDeclareOptions},
+};
+use miette::{IntoDiagnostic, Result};
+use oxifed::messaging::{DomainRpcRequest, DomainRpcResponse, Message, MessageEnum};
+use oxifed::messaging::{EXCHANGE_INTERNAL_PUBLISH, EXCHANGE_RPC_REQUEST};
+use serde::Serialize;
 use std::sync::Arc;
+use thiserror::Error;
+use tokio::time::{Duration, timeout};
+use uuid::Uuid;
 
 /// Messaging-related errors
 #[derive(Error, Debug)]
@@ -80,7 +83,9 @@ impl LavinMQClient {
             .into_diagnostic()
             .map_err(|e| miette::miette!("Failed to declare exchange: {}", e))?;
 
-        Ok(Self { connection: Arc::new(connection) })
+        Ok(Self {
+            connection: Arc::new(connection),
+        })
     }
 
     /// Publish a message that implements the Message trait
@@ -117,17 +122,21 @@ impl RpcClient {
     /// Create a new RPC client
     async fn new(connection: Arc<Connection>) -> Result<Self, MessagingError> {
         let channel = connection.create_channel().await?;
-        
+
         // Create a temporary exclusive queue for receiving replies
-        let reply_queue = channel.queue_declare(
-            "",
-            QueueDeclareOptions {
-                exclusive: true,
-                auto_delete: true,
-                ..Default::default()
-            },
-            lapin::types::FieldTable::default(),
-        ).await?.name().to_string();
+        let reply_queue = channel
+            .queue_declare(
+                "",
+                QueueDeclareOptions {
+                    exclusive: true,
+                    auto_delete: true,
+                    ..Default::default()
+                },
+                lapin::types::FieldTable::default(),
+            )
+            .await?
+            .name()
+            .to_string();
 
         Ok(Self {
             connection,
@@ -136,20 +145,25 @@ impl RpcClient {
     }
 
     /// Send an RPC request and wait for response
-    /// 
+    ///
     /// Note: RPC requests are wrapped in MessageEnum before sending to ensure
     /// compatibility with the server-side parsing. The server expects all messages
     /// to be wrapped in MessageEnum, so we use `request.to_message()` here.
-    pub async fn send_rpc_request(&self, request: DomainRpcRequest) -> Result<DomainRpcResponse, MessagingError> {
+    pub async fn send_rpc_request(
+        &self,
+        request: DomainRpcRequest,
+    ) -> Result<DomainRpcResponse, MessagingError> {
         let channel = self.connection.create_channel().await?;
-        
+
         // Setup consumer for the reply queue
-        let mut consumer = channel.basic_consume(
-            &self.reply_queue,
-            "",
-            BasicConsumeOptions::default(),
-            lapin::types::FieldTable::default(),
-        ).await?;
+        let mut consumer = channel
+            .basic_consume(
+                &self.reply_queue,
+                "",
+                BasicConsumeOptions::default(),
+                lapin::types::FieldTable::default(),
+            )
+            .await?;
 
         // Serialize the request (wrapped in MessageEnum for server compatibility)
         let request_data = serde_json::to_vec(&request.to_message())?;
@@ -160,17 +174,19 @@ impl RpcClient {
             .with_reply_to(self.reply_queue.clone().into())
             .with_correlation_id(correlation_id.clone().into());
 
-        channel.basic_publish(
-            EXCHANGE_RPC_REQUEST,
-            "domain", // routing key for domain requests
-            BasicPublishOptions::default(),
-            &request_data,
-            properties,
-        ).await?;
+        channel
+            .basic_publish(
+                EXCHANGE_RPC_REQUEST,
+                "domain", // routing key for domain requests
+                BasicPublishOptions::default(),
+                &request_data,
+                properties,
+            )
+            .await?;
 
         // Wait for response with timeout
         let response_timeout = Duration::from_secs(30);
-        
+
         match timeout(response_timeout, async {
             while let Some(delivery) = consumer.next().await {
                 match delivery {
@@ -178,10 +194,13 @@ impl RpcClient {
                         if let Some(corr_id) = delivery.properties.correlation_id() {
                             if corr_id.as_str() == correlation_id {
                                 // Found our response
-                                if let Err(e) = delivery.ack(lapin::options::BasicAckOptions::default()).await {
+                                if let Err(e) = delivery
+                                    .ack(lapin::options::BasicAckOptions::default())
+                                    .await
+                                {
                                     tracing::warn!("Failed to ack RPC response: {}", e);
                                 }
-                                
+
                                 // Parse response (also wrapped in MessageEnum)
                                 let message: MessageEnum = serde_json::from_slice(&delivery.data)?;
                                 if let MessageEnum::DomainRpcResponse(response) = message {
@@ -196,7 +215,9 @@ impl RpcClient {
                 }
             }
             Err(MessagingError::ConfirmationError)
-        }).await {
+        })
+        .await
+        {
             Ok(result) => result,
             Err(_) => Err(MessagingError::ConfirmationError), // Timeout
         }
@@ -206,9 +227,9 @@ impl RpcClient {
     pub async fn list_domains(&self) -> Result<Vec<oxifed::messaging::DomainInfo>, MessagingError> {
         let request_id = Uuid::new_v4().to_string();
         let request = DomainRpcRequest::list_domains(request_id);
-        
+
         let response = self.send_rpc_request(request).await?;
-        
+
         match response.result {
             oxifed::messaging::DomainRpcResult::DomainList { domains } => Ok(domains),
             oxifed::messaging::DomainRpcResult::Error { message: _ } => {
@@ -219,12 +240,15 @@ impl RpcClient {
     }
 
     /// Get details for a specific domain
-    pub async fn get_domain(&self, domain: &str) -> Result<Option<oxifed::messaging::DomainInfo>, MessagingError> {
+    pub async fn get_domain(
+        &self,
+        domain: &str,
+    ) -> Result<Option<oxifed::messaging::DomainInfo>, MessagingError> {
         let request_id = Uuid::new_v4().to_string();
         let request = DomainRpcRequest::get_domain(request_id, domain.to_string());
-        
+
         let response = self.send_rpc_request(request).await?;
-        
+
         match response.result {
             oxifed::messaging::DomainRpcResult::DomainDetails { domain } => Ok(domain),
             oxifed::messaging::DomainRpcResult::Error { message: _ } => {

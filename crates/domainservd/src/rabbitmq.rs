@@ -13,18 +13,21 @@ use lapin::{
     types::FieldTable,
 };
 
-
+use mongodb::bson::Bson;
 use oxifed::messaging::{
     AcceptActivityMessage, AnnounceActivityMessage, DomainCreateMessage, DomainDeleteMessage,
-    DomainUpdateMessage, DomainRpcRequest, DomainRpcResponse, FollowActivityMessage, LikeActivityMessage,
-    MessageEnum, NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
-    ProfileDeleteMessage, ProfileUpdateMessage, RejectActivityMessage, Message, DomainInfo,
+    DomainInfo, DomainRpcRequest, DomainRpcResponse, DomainUpdateMessage, FollowActivityMessage,
+    LikeActivityMessage, Message, MessageEnum, NoteCreateMessage, NoteDeleteMessage,
+    NoteUpdateMessage, ProfileCreateMessage, ProfileDeleteMessage, ProfileUpdateMessage,
+    RejectActivityMessage,
 };
-use std::time::SystemTime;
-use mongodb::bson::Bson;
-use oxifed::messaging::{EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INTERNAL_PUBLISH, EXCHANGE_RPC_REQUEST, EXCHANGE_RPC_RESPONSE, QUEUE_RPC_DOMAIN};
+use oxifed::messaging::{
+    EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INTERNAL_PUBLISH, EXCHANGE_RPC_REQUEST,
+    EXCHANGE_RPC_RESPONSE, QUEUE_RPC_DOMAIN,
+};
 use serde::de::Error;
 use std::sync::Arc;
+use std::time::SystemTime;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
@@ -195,7 +198,7 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
 pub async fn start_consumers(pool: Pool, db: Arc<MongoDB>) -> Result<(), RabbitMQError> {
     // Start activities message consumer
     start_activities_consumer(pool.clone(), db.clone()).await?;
-    
+
     // Start RPC consumer for domain queries
     start_rpc_consumer(pool.clone(), db.clone()).await?;
 
@@ -205,53 +208,63 @@ pub async fn start_consumers(pool: Pool, db: Arc<MongoDB>) -> Result<(), RabbitM
 /// Start RPC consumer for domain queries
 async fn start_rpc_consumer(pool: Pool, db: Arc<MongoDB>) -> Result<(), RabbitMQError> {
     info!("Starting RPC consumer for domain queries");
-    
+
     tokio::spawn(async move {
         loop {
             match pool.get().await {
-                Ok(conn) => {
-                    match conn.create_channel().await {
-                        Ok(channel) => {
-                            match channel.basic_consume(
+                Ok(conn) => match conn.create_channel().await {
+                    Ok(channel) => {
+                        match channel
+                            .basic_consume(
                                 QUEUE_RPC_DOMAIN,
                                 RPC_CONSUMER_TAG,
                                 BasicConsumeOptions::default(),
                                 FieldTable::default(),
-                            ).await {
-                                Ok(mut consumer) => {
-                                    info!("RPC consumer started successfully");
-                                    while let Some(delivery) = consumer.next().await {
-                                        match delivery {
-                                            Ok(delivery) => {
-                                                if let Err(e) = process_rpc_message(&delivery.data, &db, &channel, &delivery.properties).await {
-                                                    error!("Failed to process RPC message: {}", e);
-                                                }
-                                                
-                                                if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
-                                                    error!("Failed to acknowledge RPC message: {}", e);
-                                                }
+                            )
+                            .await
+                        {
+                            Ok(mut consumer) => {
+                                info!("RPC consumer started successfully");
+                                while let Some(delivery) = consumer.next().await {
+                                    match delivery {
+                                        Ok(delivery) => {
+                                            if let Err(e) = process_rpc_message(
+                                                &delivery.data,
+                                                &db,
+                                                &channel,
+                                                &delivery.properties,
+                                            )
+                                            .await
+                                            {
+                                                error!("Failed to process RPC message: {}", e);
                                             }
-                                            Err(e) => {
-                                                error!("Failed to consume RPC message: {}", e);
+
+                                            if let Err(e) =
+                                                delivery.ack(BasicAckOptions::default()).await
+                                            {
+                                                error!("Failed to acknowledge RPC message: {}", e);
                                             }
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to consume RPC message: {}", e);
                                         }
                                     }
                                 }
-                                Err(e) => {
-                                    error!("Failed to start RPC consumer: {}", e);
-                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to start RPC consumer: {}", e);
                             }
                         }
-                        Err(e) => {
-                            error!("Failed to create RPC channel: {}", e);
-                        }
                     }
-                }
+                    Err(e) => {
+                        error!("Failed to create RPC channel: {}", e);
+                    }
+                },
                 Err(e) => {
                     error!("Failed to get RPC connection: {}", e);
                 }
             }
-            
+
             warn!("RPC consumer stopped, restarting in 5 seconds...");
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
@@ -340,7 +353,7 @@ async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQE
 }
 
 /// Process RPC messages for domain queries
-/// 
+///
 /// Note: RPC messages are wrapped in MessageEnum when sent over RabbitMQ.
 /// The client sends `request.to_message()` which wraps the DomainRpcRequest
 /// in a MessageEnum, so we must parse MessageEnum first, then extract the
@@ -351,9 +364,9 @@ async fn process_rpc_message(
     channel: &lapin::Channel,
     properties: &lapin::BasicProperties,
 ) -> Result<(), RabbitMQError> {
-    use oxifed::messaging::{DomainRpcRequest, DomainRpcResponse, DomainRpcResult};
     use lapin::options::BasicPublishOptions;
-    
+    use oxifed::messaging::{DomainRpcRequest, DomainRpcResponse, DomainRpcResult};
+
     // Parse the message envelope first (MessageEnum wrapper)
     let message: MessageEnum = match serde_json::from_slice(data) {
         Ok(msg) => msg,
@@ -372,7 +385,10 @@ async fn process_rpc_message(
         }
     };
 
-    info!("Processing RPC request: {} (type: {:?})", request.request_id, request.request_type);
+    info!(
+        "Processing RPC request: {} (type: {:?})",
+        request.request_id, request.request_type
+    );
 
     // Process the request
     let response = match request.request_type {
@@ -387,7 +403,9 @@ async fn process_rpc_message(
     // Send response back to the client
     if let Some(reply_to) = &properties.reply_to() {
         let default_correlation_id = request.request_id.clone().into();
-        let correlation_id = properties.correlation_id().as_ref()
+        let correlation_id = properties
+            .correlation_id()
+            .as_ref()
             .unwrap_or(&default_correlation_id);
 
         let response_data = match serde_json::to_vec(&response.to_message()) {
@@ -398,16 +416,19 @@ async fn process_rpc_message(
             }
         };
 
-        let response_properties = lapin::BasicProperties::default()
-            .with_correlation_id(correlation_id.clone());
+        let response_properties =
+            lapin::BasicProperties::default().with_correlation_id(correlation_id.clone());
 
-        if let Err(e) = channel.basic_publish(
-            "", // Use default exchange for direct reply
-            reply_to.as_str(),
-            BasicPublishOptions::default(),
-            &response_data,
-            response_properties,
-        ).await {
+        if let Err(e) = channel
+            .basic_publish(
+                "", // Use default exchange for direct reply
+                reply_to.as_str(),
+                BasicPublishOptions::default(),
+                &response_data,
+                response_properties,
+            )
+            .await
+        {
             error!("Failed to send RPC response: {}", e);
         } else {
             info!("RPC response sent for request: {}", request.request_id);
@@ -420,10 +441,7 @@ async fn process_rpc_message(
 }
 
 /// Handle list domains RPC request
-async fn handle_list_domains_rpc(
-    db: &Arc<MongoDB>,
-    request_id: &str,
-) -> DomainRpcResponse {
+async fn handle_list_domains_rpc(db: &Arc<MongoDB>, request_id: &str) -> DomainRpcResponse {
     use mongodb::bson::doc;
     use oxifed::database::DomainDocument;
 
@@ -437,10 +455,13 @@ async fn handle_list_domains_rpc(
                 Ok(docs) => docs,
                 Err(e) => {
                     error!("Failed to collect domain documents: {}", e);
-                    return DomainRpcResponse::error(request_id.to_string(), format!("Database error: {}", e));
+                    return DomainRpcResponse::error(
+                        request_id.to_string(),
+                        format!("Database error: {}", e),
+                    );
                 }
             };
-            
+
             for domain_doc in domain_docs {
                 let domain_info = DomainInfo {
                     domain: domain_doc.domain,
@@ -458,7 +479,7 @@ async fn handle_list_domains_rpc(
                 };
                 domains.push(domain_info);
             }
-            
+
             info!("Found {} domains", domains.len());
             DomainRpcResponse::domain_list(request_id.to_string(), domains)
         }
@@ -493,7 +514,7 @@ async fn handle_get_domain_rpc(
                 created_at: domain_doc.created_at.to_rfc3339(),
                 updated_at: domain_doc.updated_at.to_rfc3339(),
             };
-            
+
             info!("Found domain: {}", domain_name);
             DomainRpcResponse::domain_details(request_id.to_string(), Some(domain_info))
         }
@@ -747,7 +768,11 @@ async fn remove_follower_relationship(
 
     // Update follow status using the unified database manager
     db.manager()
-        .update_follow_status(follower_id, &target_actor_id, oxifed::database::FollowStatus::Cancelled)
+        .update_follow_status(
+            follower_id,
+            &target_actor_id,
+            oxifed::database::FollowStatus::Cancelled,
+        )
         .await
         .map_err(|e| RabbitMQError::DbError(crate::db::DbError::DatabaseError(e)))?;
 
@@ -827,7 +852,9 @@ async fn delete_note_object(
 
     let _note: Option<oxifed::database::ObjectDocument> = if !msg.force {
         // Use unified database manager to find note
-        db.manager().find_object_by_id(&msg.id).await
+        db.manager()
+            .find_object_by_id(&msg.id)
+            .await
             .map_err(|e| RabbitMQError::DbError(crate::db::DbError::DatabaseError(e)))?
     } else {
         None
@@ -922,7 +949,8 @@ async fn update_note_object(
 
     // Find the note to update
     // Find the existing note
-    let existing_note = db.manager()
+    let existing_note = db
+        .manager()
         .find_object_by_id(&msg.id)
         .await
         .map_err(|e| RabbitMQError::DbError(crate::db::DbError::DatabaseError(e)))?;
@@ -950,20 +978,22 @@ async fn update_note_object(
     // Update tags if provided
     if let Some(tags_str) = &msg.tags {
         let tags: Vec<&str> = tags_str.split(',').map(|s| s.trim()).collect();
-        let tags_docs: Vec<mongodb::bson::Document> = tags.into_iter().map(|tag| {
-            mongodb::bson::doc! {
-                "tag_type": "Hashtag",
-                "name": tag,
-                "href": format!("https://{}/tags/{}", domain, tag)
-            }
-        }).collect();
+        let tags_docs: Vec<mongodb::bson::Document> = tags
+            .into_iter()
+            .map(|tag| {
+                mongodb::bson::doc! {
+                    "tag_type": "Hashtag",
+                    "name": tag,
+                    "href": format!("https://{}/tags/{}", domain, tag)
+                }
+            })
+            .collect();
         update_doc.insert("tag", tags_docs);
     }
 
     // Add custom properties if provided
     if let Some(props) = &msg.properties {
-        let props_doc = mongodb::bson::to_document(props)
-            .map_err(RabbitMQError::BsonError)?;
+        let props_doc = mongodb::bson::to_document(props).map_err(RabbitMQError::BsonError)?;
         update_doc.insert("additional_properties", props_doc);
     }
 
@@ -1030,7 +1060,8 @@ async fn create_note_object(
     // Get the actor to attach as attributedTo
     let actor_id_str = format!("https://{}/users/{}", &domain, &username);
 
-    let actor = db.find_actor_by_id(&actor_id_str)
+    let actor = db
+        .find_actor_by_id(&actor_id_str)
         .await
         .map_err(|e| RabbitMQError::DbError(e))?;
 
@@ -1051,7 +1082,8 @@ async fn create_note_object(
     let _note_id_url = url::Url::parse(&note_id).map_err(|e| RabbitMQError::URLParse(e))?;
 
     // Check if a note with this ID already exists
-    let existing_note = db.manager()
+    let existing_note = db
+        .manager()
         .find_object_by_id(&note_id)
         .await
         .map_err(|e| RabbitMQError::DbError(crate::db::DbError::DatabaseError(e)))?;
@@ -1092,7 +1124,10 @@ async fn create_note_object(
         attachment: None,
         language: None,
         sensitive: Some(false),
-        additional_properties: msg.properties.clone().map(|p| mongodb::bson::to_document(&p).unwrap_or_default()),
+        additional_properties: msg
+            .properties
+            .clone()
+            .map(|p| mongodb::bson::to_document(&p).unwrap_or_default()),
         local: true,
         visibility: oxifed::database::VisibilityLevel::Public,
         created_at: now,
@@ -1150,8 +1185,11 @@ async fn create_note_object(
 async fn publish_activity_document_to_exchange(
     activity: &oxifed::database::ActivityDocument,
 ) -> Result<(), RabbitMQError> {
-    info!("Publishing activity {} to ActivityPub exchange", activity.activity_id);
-    
+    info!(
+        "Publishing activity {} to ActivityPub exchange",
+        activity.activity_id
+    );
+
     // Convert ActivityDocument to legacy Activity format for publishing
     let _legacy_activity = oxifed::Activity {
         activity_type: activity.activity_type.clone(),
@@ -1159,16 +1197,18 @@ async fn publish_activity_document_to_exchange(
         name: activity.name.clone(),
         summary: activity.summary.clone(),
         actor: Some(oxifed::ObjectOrLink::Url(
-            url::Url::parse(&activity.actor).map_err(RabbitMQError::URLParse)?
+            url::Url::parse(&activity.actor).map_err(RabbitMQError::URLParse)?,
         )),
         object: activity.object.as_ref().map(|obj| {
             oxifed::ObjectOrLink::Url(
-                url::Url::parse(obj).unwrap_or_else(|_| url::Url::parse("https://example.com/unknown").unwrap())
+                url::Url::parse(obj)
+                    .unwrap_or_else(|_| url::Url::parse("https://example.com/unknown").unwrap()),
             )
         }),
         target: activity.target.as_ref().map(|t| {
             oxifed::ObjectOrLink::Url(
-                url::Url::parse(t).unwrap_or_else(|_| url::Url::parse("https://example.com/unknown").unwrap())
+                url::Url::parse(t)
+                    .unwrap_or_else(|_| url::Url::parse("https://example.com/unknown").unwrap()),
             )
         }),
         published: activity.published,
@@ -1179,7 +1219,7 @@ async fn publish_activity_document_to_exchange(
     // TODO: Implement actual message queue publishing
     // This would serialize the activity and send it to the ActivityPub exchange
     info!("Activity {} queued for delivery", activity.activity_id);
-    
+
     Ok(())
 }
 
@@ -1211,11 +1251,17 @@ async fn update_person_object(
     }
 
     if let Some(icon) = &msg.icon {
-        update_doc.insert("icon", mongodb::bson::to_bson(&icon).map_err(RabbitMQError::BsonError)?);
+        update_doc.insert(
+            "icon",
+            mongodb::bson::to_bson(&icon).map_err(RabbitMQError::BsonError)?,
+        );
     }
 
     if let Some(attachments) = &msg.attachments {
-        update_doc.insert("attachment", mongodb::bson::to_bson(&attachments).map_err(RabbitMQError::BsonError)?);
+        update_doc.insert(
+            "attachment",
+            mongodb::bson::to_bson(&attachments).map_err(RabbitMQError::BsonError)?,
+        );
     }
 
     if !update_doc.is_empty() {
@@ -1242,7 +1288,8 @@ async fn create_person_object(
     let actor_id = format!("https://{}/users/{}", &domain, &username);
 
     // Check if an actor with this ID already exists
-    let existing_actor = db.find_actor_by_id(&actor_id)
+    let existing_actor = db
+        .find_actor_by_id(&actor_id)
         .await
         .map_err(|e| RabbitMQError::DbError(e))?;
 
@@ -1285,7 +1332,10 @@ async fn create_person_object(
         public_key: None, // TODO: Generate public key
         endpoints: Some(mongodb::bson::to_document(&endpoints).unwrap_or_default()),
         attachment: None,
-        additional_properties: message.properties.clone().map(|p| mongodb::bson::to_document(&p).unwrap_or_default()),
+        additional_properties: message
+            .properties
+            .clone()
+            .map(|p| mongodb::bson::to_document(&p).unwrap_or_default()),
         status: oxifed::database::ActorStatus::Active,
         created_at: now,
         updated_at: now,
@@ -1319,7 +1369,9 @@ async fn create_webfinger_profile(
     let filter = mongodb::bson::doc! { "subject": &formatted_subject };
     let existing = jrd_profiles.find_one(filter.clone()).await.map_err(|e| {
         error!("Failed to check for existing profile: {}", e);
-        RabbitMQError::DbError(crate::db::DbError::DatabaseError(oxifed::database::DatabaseError::MongoError(e)))
+        RabbitMQError::DbError(crate::db::DbError::DatabaseError(
+            oxifed::database::DatabaseError::MongoError(e),
+        ))
     })?;
 
     if existing.is_some() {
@@ -1346,7 +1398,9 @@ async fn create_webfinger_profile(
     // Insert the new profile
     jrd_profiles.insert_one(resource).await.map_err(|e| {
         error!("Failed to insert profile: {}", e);
-        RabbitMQError::DbError(crate::db::DbError::DatabaseError(oxifed::database::DatabaseError::MongoError(e)))
+        RabbitMQError::DbError(crate::db::DbError::DatabaseError(
+            oxifed::database::DatabaseError::MongoError(e),
+        ))
     })?;
 
     info!(
@@ -1395,8 +1449,8 @@ async fn create_domain_object(
     db: &Arc<MongoDB>,
     msg: &oxifed::messaging::DomainCreateMessage,
 ) -> Result<(), RabbitMQError> {
-    use oxifed::database::{DomainDocument, RegistrationMode, DomainStatus};
     use chrono::Utc;
+    use oxifed::database::{DomainDocument, DomainStatus, RegistrationMode};
 
     info!("Creating domain: {}", msg.domain);
 
@@ -1433,9 +1487,10 @@ async fn create_domain_object(
         max_file_size: msg.max_file_size,
         allowed_file_types: msg.allowed_file_types.clone(),
         domain_key_id: None, // Will be set when domain key is generated
-        config: msg.properties.as_ref().map(|p| {
-            mongodb::bson::to_document(p).unwrap_or_default()
-        }),
+        config: msg
+            .properties
+            .as_ref()
+            .map(|p| mongodb::bson::to_document(p).unwrap_or_default()),
         status: DomainStatus::Active,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -1460,8 +1515,8 @@ async fn update_domain_object(
     db: &Arc<MongoDB>,
     msg: &oxifed::messaging::DomainUpdateMessage,
 ) -> Result<(), RabbitMQError> {
+    use mongodb::bson::{Document, doc};
     use oxifed::database::RegistrationMode;
-    use mongodb::bson::{doc, Document};
 
     info!("Updating domain: {}", msg.domain);
 
@@ -1496,9 +1551,11 @@ async fn update_domain_object(
             "approval" => RegistrationMode::Approval,
             "invite" => RegistrationMode::Invite,
             "closed" => RegistrationMode::Closed,
-            _ => return Err(RabbitMQError::JsonError(serde_json::Error::custom(
-                format!("Invalid registration mode: {}", registration_mode)
-            ))),
+            _ => {
+                return Err(RabbitMQError::JsonError(serde_json::Error::custom(
+                    format!("Invalid registration mode: {}", registration_mode),
+                )));
+            }
         };
         update_doc.insert("registration_mode", mongodb::bson::to_bson(&mode).unwrap());
     }
@@ -1515,15 +1572,21 @@ async fn update_domain_object(
         update_doc.insert("allowed_file_types", allowed_file_types);
     }
     if let Some(properties) = &msg.properties {
-        update_doc.insert("config", mongodb::bson::to_document(properties).unwrap_or_default());
+        update_doc.insert(
+            "config",
+            mongodb::bson::to_document(properties).unwrap_or_default(),
+        );
     }
 
-    update_doc.insert("updated_at", mongodb::bson::to_bson(&chrono::Utc::now()).unwrap());
+    update_doc.insert(
+        "updated_at",
+        mongodb::bson::to_bson(&chrono::Utc::now()).unwrap(),
+    );
 
     // Perform update
-    let collection: mongodb::Collection<oxifed::database::DomainDocument> = 
+    let collection: mongodb::Collection<oxifed::database::DomainDocument> =
         db.database().collection("domains");
-    
+
     match collection
         .update_one(doc! { "domain": &msg.domain }, doc! { "$set": update_doc })
         .await
@@ -1567,15 +1630,15 @@ async fn delete_domain_object(
 
     // Check if domain has any actors (unless force is true)
     if !msg.force {
-        let actor_collection: mongodb::Collection<oxifed::database::ActorDocument> = 
+        let actor_collection: mongodb::Collection<oxifed::database::ActorDocument> =
             db.database().collection("actors");
-        
+
         let actor_count = actor_collection
             .count_documents(doc! { "domain": &msg.domain })
             .await
-            .map_err(|e| RabbitMQError::DatabaseError(
-                oxifed::database::DatabaseError::MongoError(e)
-            ))?;
+            .map_err(|e| {
+                RabbitMQError::DatabaseError(oxifed::database::DatabaseError::MongoError(e))
+            })?;
 
         if actor_count > 0 {
             return Err(RabbitMQError::ConstraintError(format!(
@@ -1586,23 +1649,28 @@ async fn delete_domain_object(
     }
 
     // Delete the domain
-    let collection: mongodb::Collection<oxifed::database::DomainDocument> = 
+    let collection: mongodb::Collection<oxifed::database::DomainDocument> =
         db.database().collection("domains");
-    
+
     match collection.delete_one(doc! { "domain": &msg.domain }).await {
         Ok(result) => {
             if result.deleted_count > 0 {
                 info!("Domain {} deleted successfully", msg.domain);
-                
+
                 // If force is true, also delete all associated actors
                 if msg.force {
-                    let actor_collection: mongodb::Collection<oxifed::database::ActorDocument> = 
+                    let actor_collection: mongodb::Collection<oxifed::database::ActorDocument> =
                         db.database().collection("actors");
-                    
-                    match actor_collection.delete_many(doc! { "domain": &msg.domain }).await {
+
+                    match actor_collection
+                        .delete_many(doc! { "domain": &msg.domain })
+                        .await
+                    {
                         Ok(actor_result) => {
-                            info!("Deleted {} actors from domain {}", 
-                                actor_result.deleted_count, msg.domain);
+                            info!(
+                                "Deleted {} actors from domain {}",
+                                actor_result.deleted_count, msg.domain
+                            );
                         }
                         Err(e) => {
                             warn!("Failed to delete actors from domain {}: {}", msg.domain, e);

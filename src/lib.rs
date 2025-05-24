@@ -363,11 +363,17 @@ impl<'de> Deserialize<'de> for ActivityPubEntity {
                             .map_err(serde::de::Error::custom)?;
                         Ok(ActivityPubEntity::Link(link))
                     }
-                    // Use Actor for Actors
+                    // Try Actor for actor types, fall back to Object if required fields are missing
                     "Person" | "Application" | "Group" | "Organization" | "Service" => {
-                        let actor: Actor = serde_json::from_value(value.clone())
-                            .map_err(serde::de::Error::custom)?;
-                        Ok(ActivityPubEntity::Actor(actor))
+                        // First try to parse as Actor
+                        if let Ok(actor) = serde_json::from_value::<Actor>(value.clone()) {
+                            Ok(ActivityPubEntity::Actor(actor))
+                        } else {
+                            // If Actor parsing fails (e.g., missing domain field), parse as Object
+                            let object: Object = serde_json::from_value(value.clone())
+                                .map_err(serde::de::Error::custom)?;
+                            Ok(ActivityPubEntity::Object(object))
+                        }
                     }
                     // Default to Object for all other types
                     _ => {

@@ -6,14 +6,14 @@
 //! - Trust chain verification
 //! - Node info and metadata
 
-use crate::pki::{PkiManager, TrustLevel};
 use crate::database::DatabaseManager;
+use crate::pki::{PkiManager, TrustLevel};
 use axum::{
+    Json, Router,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -212,9 +212,7 @@ pub fn well_known_router(state: WellKnownState) -> Router<WellKnownState> {
 }
 
 /// Get master key endpoint
-async fn get_master_key(
-    State(state): State<WellKnownState>,
-) -> Result<Response, StatusCode> {
+async fn get_master_key(State(state): State<WellKnownState>) -> Result<Response, StatusCode> {
     debug!("Serving master key for {}", state.master_domain);
 
     let master_key = match state.pki.master_key.as_ref() {
@@ -237,7 +235,11 @@ async fn get_master_key(
         key_size,
         created_at: master_key.created_at,
         fingerprint: master_key.public_key.fingerprint.clone(),
-        usage: master_key.usage.iter().map(|u| format!("{:?}", u)).collect(),
+        usage: master_key
+            .usage
+            .iter()
+            .map(|u| format!("{:?}", u))
+            .collect(),
         key_type: "MasterKey".to_string(),
     };
 
@@ -245,13 +247,12 @@ async fn get_master_key(
         StatusCode::OK,
         [("Content-Type", "application/json")],
         Json(response),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Get domain key endpoint
-async fn get_domain_key(
-    State(state): State<WellKnownState>,
-) -> Result<Response, StatusCode> {
+async fn get_domain_key(State(state): State<WellKnownState>) -> Result<Response, StatusCode> {
     debug!("Serving domain key for {}", state.domain);
 
     let domain_key = match state.pki.domain_keys.get(&state.domain) {
@@ -267,13 +268,14 @@ async fn get_domain_key(
         crate::pki::KeyAlgorithm::Ed25519 => None,
     };
 
-    let master_signature = domain_key.master_signature.as_ref().map(|sig| {
-        MasterSignatureInfo {
+    let master_signature = domain_key
+        .master_signature
+        .as_ref()
+        .map(|sig| MasterSignatureInfo {
             signature: sig.signature.clone(),
             signed_at: sig.signed_at,
             master_key_id: sig.master_key_id.clone(),
-        }
-    });
+        });
 
     let response = DomainKeyResponse {
         key_id: domain_key.key_id.clone(),
@@ -285,7 +287,11 @@ async fn get_domain_key(
         expires_at: domain_key.expires_at,
         master_signature,
         fingerprint: domain_key.public_key.fingerprint.clone(),
-        usage: domain_key.usage.iter().map(|u| format!("{:?}", u)).collect(),
+        usage: domain_key
+            .usage
+            .iter()
+            .map(|u| format!("{:?}", u))
+            .collect(),
         key_type: "DomainKey".to_string(),
     };
 
@@ -293,7 +299,8 @@ async fn get_domain_key(
         StatusCode::OK,
         [("Content-Type", "application/json")],
         Json(response),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Get trust chain for a key
@@ -311,16 +318,18 @@ async fn get_trust_chain(
         }
     };
 
-    let verification_chain = trust_chain.verification_chain.into_iter().map(|link| {
-        TrustChainLinkResponse {
+    let verification_chain = trust_chain
+        .verification_chain
+        .into_iter()
+        .map(|link| TrustChainLinkResponse {
             level: link.level,
             key_id: link.key_id,
             signed_by: link.signed_by,
             signed_at: link.signed_at,
             self_signed: link.self_signed,
             created_at: link.created_at,
-        }
-    }).collect();
+        })
+        .collect();
 
     let response = TrustChainResponse {
         key_id: trust_chain.key_id,
@@ -333,7 +342,8 @@ async fn get_trust_chain(
         StatusCode::OK,
         [("Content-Type", "application/json")],
         Json(response),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Get node info discovery
@@ -353,13 +363,12 @@ async fn get_nodeinfo_discovery(
         StatusCode::OK,
         [("Content-Type", "application/json")],
         Json(discovery),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Get node info 2.0
-async fn get_nodeinfo(
-    State(state): State<WellKnownState>,
-) -> Result<Response, StatusCode> {
+async fn get_nodeinfo(State(state): State<WellKnownState>) -> Result<Response, StatusCode> {
     let nodeinfo = NodeInfo {
         version: "2.0".to_string(),
         software: NodeInfoSoftware {
@@ -400,15 +409,17 @@ async fn get_nodeinfo(
 
     Ok((
         StatusCode::OK,
-        [("Content-Type", "application/json; profile=\"http://nodeinfo.diaspora.software/ns/schema/2.0#\"")],
+        [(
+            "Content-Type",
+            "application/json; profile=\"http://nodeinfo.diaspora.software/ns/schema/2.0#\"",
+        )],
         Json(nodeinfo),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Get host-meta for XRD discovery
-async fn get_host_meta(
-    State(state): State<WellKnownState>,
-) -> Result<Response, StatusCode> {
+async fn get_host_meta(State(state): State<WellKnownState>) -> Result<Response, StatusCode> {
     let host_meta = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <XRD xmlns="http://docs.oasis-open.org/ns/xri/xrd-1.0">
@@ -421,7 +432,8 @@ async fn get_host_meta(
         StatusCode::OK,
         [("Content-Type", "application/xrd+xml")],
         host_meta,
-    ).into_response())
+    )
+        .into_response())
 }
 
 #[cfg(test)]
@@ -433,13 +445,14 @@ mod tests {
     #[tokio::test]
     async fn test_master_key_endpoint() {
         let mut pki = PkiManager::new();
-        
+
         // Create a mock master key
         let key_pair = KeyPair::from_pem(
             KeyAlgorithm::Rsa { key_size: 4096 },
             "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----".to_string(),
             "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let master_key = crate::pki::MasterKeyInfo {
             key_id: "https://example.com/.well-known/oxifed/master-key".to_string(),
@@ -453,9 +466,11 @@ mod tests {
         pki.master_key = Some(master_key);
 
         // Create a mock database for testing
-        let client = Client::with_uri_str("mongodb://localhost:27017").await.unwrap();
+        let client = Client::with_uri_str("mongodb://localhost:27017")
+            .await
+            .unwrap();
         let database = client.database("test_oxifed");
-        
+
         let state = WellKnownState {
             pki: Arc::new(pki),
             domain: "example.com".to_string(),

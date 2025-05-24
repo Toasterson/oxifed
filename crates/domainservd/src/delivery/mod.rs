@@ -377,17 +377,24 @@ impl DeliveryManager {
     /// Get followers from database
     async fn get_followers(&self, username: &str) -> Result<Vec<FollowerRecord>> {
         let actor_id = format!("https://{}/users/{}", "example.com", username); // TODO: get domain from config
-        let follower_ids = self.db.manager().get_actor_followers(&actor_id).await
+        let follower_ids = self
+            .db
+            .manager()
+            .get_actor_followers(&actor_id)
+            .await
             .map_err(|e| DeliveryError::DatabaseError(e.to_string()))?;
-        
+
         // Convert follower IDs to FollowerRecord format for compatibility
-        let followers = follower_ids.into_iter().map(|actor_id| FollowerRecord {
-            actor_id: actor_id.clone(),
-            followed_at: chrono::Utc::now(), // TODO: get actual timestamp from database
-            inbox_url: format!("{}/inbox", actor_id),
-            shared_inbox_url: None,
-        }).collect();
-        
+        let followers = follower_ids
+            .into_iter()
+            .map(|actor_id| FollowerRecord {
+                actor_id: actor_id.clone(),
+                followed_at: chrono::Utc::now(), // TODO: get actual timestamp from database
+                inbox_url: format!("{}/inbox", actor_id),
+                shared_inbox_url: None,
+            })
+            .collect();
+
         Ok(followers)
     }
 
