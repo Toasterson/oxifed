@@ -1201,15 +1201,76 @@ async fn handle_domain_command_messaging(
         }
 
         DomainCommands::List => {
-            println!("Domain list request sent to domain service");
-            // This would typically trigger a query message that returns results
-            // For now, we just indicate the request was sent
+            match client.create_rpc_client().await {
+                Ok(rpc_client) => {
+                    match rpc_client.list_domains().await {
+                        Ok(domains) => {
+                            if domains.is_empty() {
+                                println!("No domains registered");
+                            } else {
+                                println!("Registered domains:");
+                                for domain in domains {
+                                    println!("  {} - {} ({})", 
+                                        domain.domain,
+                                        domain.name.unwrap_or_else(|| "No name".to_string()),
+                                        domain.status
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to list domains: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to create RPC client: {}", e);
+                }
+            }
         }
 
         DomainCommands::Show { domain } => {
-            println!("Domain details request sent for: {}", domain);
-            // This would typically trigger a query message for the specific domain
-            // For now, we just indicate the request was sent
+            match client.create_rpc_client().await {
+                Ok(rpc_client) => {
+                    match rpc_client.get_domain(domain).await {
+                        Ok(Some(domain_info)) => {
+                            println!("Domain: {}", domain_info.domain);
+                            if let Some(name) = &domain_info.name {
+                                println!("Name: {}", name);
+                            }
+                            if let Some(description) = &domain_info.description {
+                                println!("Description: {}", description);
+                            }
+                            if let Some(contact_email) = &domain_info.contact_email {
+                                println!("Contact Email: {}", contact_email);
+                            }
+                            println!("Registration Mode: {}", domain_info.registration_mode);
+                            println!("Authorized Fetch: {}", domain_info.authorized_fetch);
+                            if let Some(max_note_length) = domain_info.max_note_length {
+                                println!("Max Note Length: {}", max_note_length);
+                            }
+                            if let Some(max_file_size) = domain_info.max_file_size {
+                                println!("Max File Size: {} bytes", max_file_size);
+                            }
+                            if let Some(allowed_file_types) = &domain_info.allowed_file_types {
+                                println!("Allowed File Types: {}", allowed_file_types.join(", "));
+                            }
+                            println!("Status: {}", domain_info.status);
+                            println!("Created: {}", domain_info.created_at);
+                            println!("Updated: {}", domain_info.updated_at);
+                        }
+                        Ok(None) => {
+                            println!("Domain '{}' not found", domain);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to get domain details: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to create RPC client: {}", e);
+                }
+            }
         }
     }
 

@@ -60,8 +60,9 @@ The central ActivityPub server daemon that handles:
 - **Actor Management**: CRUD operations for user profiles and actor metadata
 - **Multi-domain Support**: Hosts multiple domains with isolated configurations
 - **Message Routing**: Distributes incoming activities to worker daemons via RabbitMQ
+- **RPC Services**: Handles real-time domain queries via RabbitMQ RPC pattern
 
-All external ActivityPub servers connect to domainservd, and it serves as the main entry point for internal applications. When messages are received at actor inboxes or the shared inbox, they are routed to the `INCOMING_EXCHANGE` for processing by specialized worker daemons.
+All external ActivityPub servers connect to domainservd, and it serves as the main entry point for internal applications. When messages are received at actor inboxes or the shared inbox, they are routed to the `INCOMING_EXCHANGE` for processing by specialized worker daemons. Domain queries use RPC pattern for real-time responses.
 
 ### publisherd
 Specialized daemon for ActivityPub protocol compliance:
@@ -73,6 +74,8 @@ Specialized daemon for ActivityPub protocol compliance:
 ### oxiadm
 Command-line administration and testing tool:
 - **Domain Management**: Register and configure domains in the system
+  - Asynchronous commands (create/update/delete) via fanout messaging
+  - Synchronous queries (list/show) via RPC pattern with 30-second timeout
 - **Profile Management**: Create and manage actor profiles and metadata
 - **Content Publishing**: Publish notes, articles, and other ActivityPub objects
 - **Social Interactions**: Follow accounts, like posts, and boost content across the federation
@@ -93,7 +96,10 @@ The platform supports multiple application types:
 ## 🗄️ Infrastructure
 
 - **Database**: MongoDB for actor profiles, activities, and domain configuration
-- **Message Queue**: RabbitMQ for inter-service communication and activity processing
+- **Message Queue**: RabbitMQ with hybrid architecture:
+  - Fanout exchanges for asynchronous command processing
+  - Direct exchanges for synchronous RPC queries
+  - Request-response pattern with correlation IDs and timeouts
 - **Federation**: Full ActivityPub protocol support for interoperability with Mastodon, Pleroma, PeerTube, and other platforms
 
 ## 📖 Getting Started

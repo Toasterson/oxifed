@@ -441,18 +441,21 @@ External ActivityPub Servers
 │                    RabbitMQ Exchanges                       │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  oxifed.internal.publish (topic)                           │
-│  ├── routing keys:                                          │
+│  oxifed.internal.publish (fanout)                          │
+│  ├── messages:                                              │
 │  │   ├── profile.create                                     │
 │  │   ├── profile.update                                     │
 │  │   ├── profile.delete                                     │
 │  │   ├── note.create                                        │
 │  │   ├── note.update                                        │
 │  │   ├── note.delete                                        │
+│  │   ├── domain.create                                      │
+│  │   ├── domain.update                                      │
+│  │   ├── domain.delete                                      │
 │  │   └── activity.*                                         │
 │  │                                                          │
-│  oxifed.activitypub.publish (topic)                        │
-│  ├── routing keys:                                          │
+│  oxifed.activitypub.publish (fanout)                       │
+│  ├── messages:                                              │
 │  │   ├── activity.create                                    │
 │  │   ├── activity.update                                    │
 │  │   ├── activity.delete                                    │
@@ -462,12 +465,13 @@ External ActivityPub Servers
 │  │   ├── activity.accept                                    │
 │  │   └── activity.reject                                    │
 │  │                                                          │
-│  oxifed.incoming (fanout)                                  │
-│  ├── queues:                                               │
-│  │   ├── incoming.filter                                    │
-│  │   ├── incoming.moderation                               │
-│  │   ├── incoming.process                                   │
-│  │   └── incoming.analytics                                │
+│  oxifed.rpc.request (direct)                               │
+│  ├── routing keys:                                          │
+│  │   └── domain                                             │
+│  │                                                          │
+│  oxifed.rpc.response (direct)                              │
+│  ├── routing keys:                                          │
+│  │   └── {client-reply-queue}                              │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -510,6 +514,106 @@ async fn publish_internal_message(
     Ok(())
 }
 ```
+
+#### RPC Message Pattern
+
+```rust
+// RPC Request structure
+#[derive(Serialize, Deserialize)]
+pub struct DomainRpcRequest {
+    pub request_id: String,
+    pub request_type: DomainRpcRequestType,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum DomainRpcRequestType {
+    ListDomains,
+    GetDomain { domain: String },
+}
+
+// RPC Response structure
+#[derive(Serialize, Deserialize)]
+pub struct DomainRpcResponse {
+    pub request_id: String,
+    pub result: DomainRpcResult,
+}
+
+// RPC Client implementation
+async fn send_rpc_request(
+    channel: &Channel,
+    request: DomainRpcRequest,
+    reply_queue: &str
+) -> Result<DomainRpcResponse, Error> {
+    let correlation_id = request.request_id.clone();
+    let request_data = serde_json::to_vec(&request)?;
+    
+    // Publish request with reply-to queue
+    channel.basic_publish(
+        "oxifed.rpc.request",
+        "domain", // routing key
+        BasicPublishOptions::default(),
+        &request_data,
+        BasicProperties::default()
+            .with_reply_to(reply_queue.into())
+            .with_correlation_id(correlation_id.into())
+    ).await?;
+    
+    // Wait for response with timeout (30 seconds)
+    let response = timeout(
+        Duration::from_secs(30),
+        wait_for_response(channel, reply_queue, &correlation_id)
+    ).await??;
+    
+    Ok(response)
+}
+
+// RPC Server handler
+async fn handle_rpc_request(
+    channel: &Channel,
+    request: DomainRpcRequest,
+    reply_to: &str,
+    correlation_id: &str
+) -> Result<(), Error> {
+    let response = match request.request_type {
+        DomainRpcRequestType::ListDomains => {
+            let domains = query_all_domains().await?;
+            DomainRpcResponse::domain_list(request.request_id, domains)
+        }
+        DomainRpcRequestType::GetDomain { domain } => {
+            let domain_info = query_domain(&domain).await?;
+            DomainRpcResponse::domain_details(request.request_id, domain_info)
+        }
+    };
+    
+    let response_data = serde_json::to_vec(&response)?;
+    
+    // Send response back to client
+    channel.basic_publish(
+        "", // Default exchange for direct reply
+        reply_to,
+        BasicPublishOptions::default(),
+        &response_data,
+        BasicProperties::default()
+            .with_correlation_id(correlation_id.into())
+    ).await?;
+    
+    Ok(())
+}
+```
+
+### Exchange Routing Patterns
+
+#### Fire-and-Forget Commands
+- **Exchange Type**: Fanout
+- **Use Case**: Domain create/update/delete, profile operations
+- **Pattern**: Publisher sends message, multiple consumers process asynchronously
+- **Reliability**: Persistent messages with acknowledgments
+
+#### Request-Response Queries  
+- **Exchange Type**: Direct
+- **Use Case**: Domain list/show, real-time queries
+- **Pattern**: Client sends request with reply-to queue, server responds with correlation ID
+- **Timeout**: 30-second timeout with error handling
 
 ## Security Architecture
 

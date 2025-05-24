@@ -2370,6 +2370,7 @@ name = "oxiadm"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "futures",
  "lapin",
  "miette",
  "oxifed",
@@ -2377,7 +2378,9 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.12",
  "tokio",
+ "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

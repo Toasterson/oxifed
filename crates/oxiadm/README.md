@@ -228,6 +228,11 @@ oxiadm boost alice@example.com https://remote.example/posts/123
 
 ### Domain Management
 
+Oxifed implements a hybrid messaging architecture for domain management:
+
+- **Asynchronous Commands** (`create`, `update`, `delete`): Use RabbitMQ fanout exchanges for fire-and-forget messaging
+- **Synchronous Queries** (`list`, `show`): Use RabbitMQ RPC with direct exchanges for real-time responses
+
 Register a new domain with the system:
 
 ```bash
@@ -249,13 +254,13 @@ oxiadm domain update example.com \
   --max-note-length 1000
 ```
 
-List all registered domains:
+List all registered domains (real-time query):
 
 ```bash
 oxiadm domain list
 ```
 
-Show domain details:
+Show domain details (real-time query):
 
 ```bash
 oxiadm domain show example.com
@@ -272,6 +277,16 @@ Force delete a domain and all its users:
 ```bash
 oxiadm domain delete example.com --force
 ```
+
+#### RabbitMQ Architecture
+
+The domain management system uses the following RabbitMQ exchanges:
+
+- **oxifed.internal.publish** (fanout): For domain create/update/delete operations
+- **oxifed.rpc.request** (direct): For domain query requests
+- **oxifed.rpc.response** (direct): For domain query responses
+
+Query commands include a 30-second timeout and use correlation IDs to match requests with responses.
 
 ### Federation Testing
 

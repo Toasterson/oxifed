@@ -3,7 +3,7 @@
 use crate::db::MongoDB;
 
 use deadpool_lapin::{Config, Pool, Runtime};
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use lapin::{
     ExchangeKind,
     options::{
@@ -16,21 +16,22 @@ use lapin::{
 
 use oxifed::messaging::{
     AcceptActivityMessage, AnnounceActivityMessage, DomainCreateMessage, DomainDeleteMessage,
-    DomainUpdateMessage, FollowActivityMessage, LikeActivityMessage,
+    DomainUpdateMessage, DomainRpcRequest, DomainRpcResponse, FollowActivityMessage, LikeActivityMessage,
     MessageEnum, NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
-    ProfileDeleteMessage, ProfileUpdateMessage, RejectActivityMessage,
+    ProfileDeleteMessage, ProfileUpdateMessage, RejectActivityMessage, Message, DomainInfo,
 };
 use std::time::SystemTime;
 use mongodb::bson::Bson;
-use oxifed::messaging::{EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INTERNAL_PUBLISH};
+use oxifed::messaging::{EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INTERNAL_PUBLISH, EXCHANGE_RPC_REQUEST, EXCHANGE_RPC_RESPONSE, QUEUE_RPC_DOMAIN};
 use serde::de::Error;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
 /// Constants for RabbitMQ queue names
-pub const QUEUE_ACTIVITIES: &str = "domainservd.oxifed.activities";
-pub const CONSUMER_TAG: &str = "domainservd-activities-consumer";
+pub const QUEUE_ACTIVITIES: &str = "oxifed.activities";
+pub const CONSUMER_TAG: &str = "activities_consumer";
+pub const RPC_CONSUMER_TAG: &str = "rpc_domain_consumer";
 
 /// RabbitMQ error types
 #[derive(Error, Debug)]
@@ -110,10 +111,50 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
         )
         .await?;
 
+    // Declare the RPC request exchange - direct exchange for RPC requests
+    channel
+        .exchange_declare(
+            EXCHANGE_RPC_REQUEST,
+            ExchangeKind::Direct,
+            ExchangeDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
+    // Declare the RPC response exchange - direct exchange for RPC responses
+    channel
+        .exchange_declare(
+            EXCHANGE_RPC_RESPONSE,
+            ExchangeKind::Direct,
+            ExchangeDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
     // Declare the activities queue
     channel
         .queue_declare(
             QUEUE_ACTIVITIES,
+            QueueDeclareOptions {
+                durable: true,
+                auto_delete: false,
+                exclusive: false,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
+    // Declare the RPC domain queue
+    channel
+        .queue_declare(
+            QUEUE_RPC_DOMAIN,
             QueueDeclareOptions {
                 durable: true,
                 auto_delete: false,
@@ -135,6 +176,17 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
         )
         .await?;
 
+    // Bind the RPC domain queue to the RPC request exchange
+    channel
+        .queue_bind(
+            QUEUE_RPC_DOMAIN,
+            EXCHANGE_RPC_REQUEST,
+            "domain", // routing key for domain requests
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+
     info!("RabbitMQ exchanges and queues initialized successfully");
     Ok(())
 }
@@ -143,11 +195,72 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
 pub async fn start_consumers(pool: Pool, db: Arc<MongoDB>) -> Result<(), RabbitMQError> {
     // Start activities message consumer
     start_activities_consumer(pool.clone(), db.clone()).await?;
+    
+    // Start RPC consumer for domain queries
+    start_rpc_consumer(pool.clone(), db.clone()).await?;
 
     Ok(())
 }
 
-/// Start a consumer for oxifed.activities messages
+/// Start RPC consumer for domain queries
+async fn start_rpc_consumer(pool: Pool, db: Arc<MongoDB>) -> Result<(), RabbitMQError> {
+    info!("Starting RPC consumer for domain queries");
+    
+    tokio::spawn(async move {
+        loop {
+            match pool.get().await {
+                Ok(conn) => {
+                    match conn.create_channel().await {
+                        Ok(channel) => {
+                            match channel.basic_consume(
+                                QUEUE_RPC_DOMAIN,
+                                RPC_CONSUMER_TAG,
+                                BasicConsumeOptions::default(),
+                                FieldTable::default(),
+                            ).await {
+                                Ok(mut consumer) => {
+                                    info!("RPC consumer started successfully");
+                                    while let Some(delivery) = consumer.next().await {
+                                        match delivery {
+                                            Ok(delivery) => {
+                                                if let Err(e) = process_rpc_message(&delivery.data, &db, &channel, &delivery.properties).await {
+                                                    error!("Failed to process RPC message: {}", e);
+                                                }
+                                                
+                                                if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
+                                                    error!("Failed to acknowledge RPC message: {}", e);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!("Failed to consume RPC message: {}", e);
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to start RPC consumer: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to create RPC channel: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get RPC connection: {}", e);
+                }
+            }
+            
+            warn!("RPC consumer stopped, restarting in 5 seconds...");
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        }
+    });
+
+    Ok(())
+}
+
+/// Start activities message consumer
 async fn start_activities_consumer(pool: Pool, db: Arc<MongoDB>) -> Result<(), RabbitMQError> {
     let conn = pool.get().await?;
     let channel = conn.create_channel().await?;
@@ -219,6 +332,179 @@ async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQE
         MessageEnum::DomainCreateMessage(msg) => create_domain_object(db, &msg).await,
         MessageEnum::DomainUpdateMessage(msg) => update_domain_object(db, &msg).await,
         MessageEnum::DomainDeleteMessage(msg) => delete_domain_object(db, &msg).await,
+        MessageEnum::DomainRpcRequest(_) | MessageEnum::DomainRpcResponse(_) => {
+            warn!("RPC messages should not be processed by this handler");
+            Ok(())
+        }
+    }
+}
+
+/// Process RPC messages for domain queries
+/// 
+/// Note: RPC messages are wrapped in MessageEnum when sent over RabbitMQ.
+/// The client sends `request.to_message()` which wraps the DomainRpcRequest
+/// in a MessageEnum, so we must parse MessageEnum first, then extract the
+/// actual RPC request from it.
+async fn process_rpc_message(
+    data: &[u8],
+    db: &Arc<MongoDB>,
+    channel: &lapin::Channel,
+    properties: &lapin::BasicProperties,
+) -> Result<(), RabbitMQError> {
+    use oxifed::messaging::{DomainRpcRequest, DomainRpcResponse, DomainRpcResult};
+    use lapin::options::BasicPublishOptions;
+    
+    // Parse the message envelope first (MessageEnum wrapper)
+    let message: MessageEnum = match serde_json::from_slice(data) {
+        Ok(msg) => msg,
+        Err(e) => {
+            error!("Failed to parse RPC message: {}", e);
+            return Ok(());
+        }
+    };
+
+    // Extract the RPC request from the message envelope
+    let request = match message {
+        MessageEnum::DomainRpcRequest(req) => req,
+        _ => {
+            error!("Received non-RPC message in RPC queue");
+            return Ok(());
+        }
+    };
+
+    info!("Processing RPC request: {} (type: {:?})", request.request_id, request.request_type);
+
+    // Process the request
+    let response = match request.request_type {
+        oxifed::messaging::DomainRpcRequestType::ListDomains => {
+            handle_list_domains_rpc(db, &request.request_id).await
+        }
+        oxifed::messaging::DomainRpcRequestType::GetDomain { domain } => {
+            handle_get_domain_rpc(db, &request.request_id, &domain).await
+        }
+    };
+
+    // Send response back to the client
+    if let Some(reply_to) = &properties.reply_to() {
+        let default_correlation_id = request.request_id.clone().into();
+        let correlation_id = properties.correlation_id().as_ref()
+            .unwrap_or(&default_correlation_id);
+
+        let response_data = match serde_json::to_vec(&response.to_message()) {
+            Ok(data) => data,
+            Err(e) => {
+                error!("Failed to serialize RPC response: {}", e);
+                return Ok(());
+            }
+        };
+
+        let response_properties = lapin::BasicProperties::default()
+            .with_correlation_id(correlation_id.clone());
+
+        if let Err(e) = channel.basic_publish(
+            "", // Use default exchange for direct reply
+            reply_to.as_str(),
+            BasicPublishOptions::default(),
+            &response_data,
+            response_properties,
+        ).await {
+            error!("Failed to send RPC response: {}", e);
+        } else {
+            info!("RPC response sent for request: {}", request.request_id);
+        }
+    } else {
+        warn!("RPC request {} has no reply_to queue", request.request_id);
+    }
+
+    Ok(())
+}
+
+/// Handle list domains RPC request
+async fn handle_list_domains_rpc(
+    db: &Arc<MongoDB>,
+    request_id: &str,
+) -> DomainRpcResponse {
+    use mongodb::bson::doc;
+    use oxifed::database::DomainDocument;
+
+    let db_manager = oxifed::database::DatabaseManager::new(db.database().clone());
+    let collection: mongodb::Collection<DomainDocument> = db.database().collection("domains");
+
+    match collection.find(doc! {}).await {
+        Ok(cursor) => {
+            let mut domains = Vec::new();
+            let domain_docs: Vec<DomainDocument> = match cursor.try_collect().await {
+                Ok(docs) => docs,
+                Err(e) => {
+                    error!("Failed to collect domain documents: {}", e);
+                    return DomainRpcResponse::error(request_id.to_string(), format!("Database error: {}", e));
+                }
+            };
+            
+            for domain_doc in domain_docs {
+                let domain_info = DomainInfo {
+                    domain: domain_doc.domain,
+                    name: domain_doc.name,
+                    description: domain_doc.description,
+                    contact_email: domain_doc.contact_email,
+                    registration_mode: format!("{:?}", domain_doc.registration_mode),
+                    authorized_fetch: domain_doc.authorized_fetch,
+                    max_note_length: domain_doc.max_note_length,
+                    max_file_size: domain_doc.max_file_size,
+                    allowed_file_types: domain_doc.allowed_file_types,
+                    status: format!("{:?}", domain_doc.status),
+                    created_at: domain_doc.created_at.to_rfc3339(),
+                    updated_at: domain_doc.updated_at.to_rfc3339(),
+                };
+                domains.push(domain_info);
+            }
+            
+            info!("Found {} domains", domains.len());
+            DomainRpcResponse::domain_list(request_id.to_string(), domains)
+        }
+        Err(e) => {
+            error!("Failed to query domains: {}", e);
+            DomainRpcResponse::error(request_id.to_string(), format!("Database error: {}", e))
+        }
+    }
+}
+
+/// Handle get domain RPC request
+async fn handle_get_domain_rpc(
+    db: &Arc<MongoDB>,
+    request_id: &str,
+    domain_name: &str,
+) -> DomainRpcResponse {
+    let db_manager = oxifed::database::DatabaseManager::new(db.database().clone());
+
+    match db_manager.find_domain_by_name(domain_name).await {
+        Ok(Some(domain_doc)) => {
+            let domain_info = DomainInfo {
+                domain: domain_doc.domain,
+                name: domain_doc.name,
+                description: domain_doc.description,
+                contact_email: domain_doc.contact_email,
+                registration_mode: format!("{:?}", domain_doc.registration_mode),
+                authorized_fetch: domain_doc.authorized_fetch,
+                max_note_length: domain_doc.max_note_length,
+                max_file_size: domain_doc.max_file_size,
+                allowed_file_types: domain_doc.allowed_file_types,
+                status: format!("{:?}", domain_doc.status),
+                created_at: domain_doc.created_at.to_rfc3339(),
+                updated_at: domain_doc.updated_at.to_rfc3339(),
+            };
+            
+            info!("Found domain: {}", domain_name);
+            DomainRpcResponse::domain_details(request_id.to_string(), Some(domain_info))
+        }
+        Ok(None) => {
+            info!("Domain not found: {}", domain_name);
+            DomainRpcResponse::domain_details(request_id.to_string(), None)
+        }
+        Err(e) => {
+            error!("Failed to query domain {}: {}", domain_name, e);
+            DomainRpcResponse::error(request_id.to_string(), format!("Database error: {}", e))
+        }
     }
 }
 

@@ -45,6 +45,114 @@ fn test_domain_create_message_serialization() {
 }
 
 #[test]
+fn test_domain_rpc_request_serialization() {
+    use oxifed::messaging::{DomainRpcRequest, DomainRpcRequestType};
+    
+    // Test list domains request
+    let list_request = DomainRpcRequest::list_domains("req-123".to_string());
+    let json = serde_json::to_string(&list_request.to_message()).unwrap();
+    
+    let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
+    if let MessageEnum::DomainRpcRequest(rpc_req) = deserialized {
+        assert_eq!(rpc_req.request_id, "req-123");
+        if let DomainRpcRequestType::ListDomains = rpc_req.request_type {
+            // Expected
+        } else {
+            panic!("Expected ListDomains request type");
+        }
+    } else {
+        panic!("Expected DomainRpcRequest");
+    }
+    
+    // Test get domain request
+    let get_request = DomainRpcRequest::get_domain("req-456".to_string(), "example.com".to_string());
+    let json = serde_json::to_string(&get_request.to_message()).unwrap();
+    
+    let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
+    if let MessageEnum::DomainRpcRequest(rpc_req) = deserialized {
+        assert_eq!(rpc_req.request_id, "req-456");
+        if let DomainRpcRequestType::GetDomain { domain } = rpc_req.request_type {
+            assert_eq!(domain, "example.com");
+        } else {
+            panic!("Expected GetDomain request type");
+        }
+    } else {
+        panic!("Expected DomainRpcRequest");
+    }
+}
+
+#[test]
+fn test_domain_rpc_response_serialization() {
+    use oxifed::messaging::{DomainRpcResponse, DomainInfo, DomainRpcResult};
+    
+    // Create test domain info
+    let domain_info = DomainInfo {
+        domain: "test.com".to_string(),
+        name: Some("Test Domain".to_string()),
+        description: Some("A test domain".to_string()),
+        contact_email: Some("admin@test.com".to_string()),
+        registration_mode: "Approval".to_string(),
+        authorized_fetch: true,
+        max_note_length: Some(500),
+        max_file_size: Some(10485760),
+        allowed_file_types: Some(vec!["image/jpeg".to_string()]),
+        status: "Active".to_string(),
+        created_at: "2024-01-01T00:00:00Z".to_string(),
+        updated_at: "2024-01-01T00:00:00Z".to_string(),
+    };
+    
+    // Test domain list response
+    let list_response = DomainRpcResponse::domain_list("req-123".to_string(), vec![domain_info.clone()]);
+    let json = serde_json::to_string(&list_response.to_message()).unwrap();
+    
+    let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
+    if let MessageEnum::DomainRpcResponse(rpc_resp) = deserialized {
+        assert_eq!(rpc_resp.request_id, "req-123");
+        if let DomainRpcResult::DomainList { domains } = rpc_resp.result {
+            assert_eq!(domains.len(), 1);
+            assert_eq!(domains[0].domain, "test.com");
+        } else {
+            panic!("Expected DomainList result");
+        }
+    } else {
+        panic!("Expected DomainRpcResponse");
+    }
+    
+    // Test domain details response
+    let details_response = DomainRpcResponse::domain_details("req-456".to_string(), Some(domain_info));
+    let json = serde_json::to_string(&details_response.to_message()).unwrap();
+    
+    let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
+    if let MessageEnum::DomainRpcResponse(rpc_resp) = deserialized {
+        assert_eq!(rpc_resp.request_id, "req-456");
+        if let DomainRpcResult::DomainDetails { domain } = rpc_resp.result {
+            assert!(domain.is_some());
+            assert_eq!(domain.unwrap().domain, "test.com");
+        } else {
+            panic!("Expected DomainDetails result");
+        }
+    } else {
+        panic!("Expected DomainRpcResponse");
+    }
+    
+    // Test error response
+    let error_response = DomainRpcResponse::error("req-789".to_string(), "Database error".to_string());
+    let json = serde_json::to_string(&error_response.to_message()).unwrap();
+    
+    let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
+    if let MessageEnum::DomainRpcResponse(rpc_resp) = deserialized {
+        assert_eq!(rpc_resp.request_id, "req-789");
+        if let DomainRpcResult::Error { message } = rpc_resp.result {
+            assert_eq!(message, "Database error");
+        } else {
+            panic!("Expected Error result");
+        }
+    } else {
+        panic!("Expected DomainRpcResponse");
+    }
+}
+
+#[test]
 fn test_domain_update_message_serialization() {
     let message = DomainUpdateMessage::new(
         "example.com".to_string(),

@@ -10,6 +10,11 @@ use serde_json::Value;
 /// Constants for RabbitMQ Exchange names
 pub const EXCHANGE_INTERNAL_PUBLISH: &str = "oxifed.internal.publish";
 pub const EXCHANGE_ACTIVITYPUB_PUBLISH: &str = "oxifed.activitypub.publish";
+pub const EXCHANGE_RPC_REQUEST: &str = "oxifed.rpc.request";
+pub const EXCHANGE_RPC_RESPONSE: &str = "oxifed.rpc.response";
+
+/// Constants for RabbitMQ Queue names
+pub const QUEUE_RPC_DOMAIN: &str = "oxifed.rpc.domain";
 
 /// Message trait that must be implemented by all message types
 pub trait Message {
@@ -33,6 +38,8 @@ pub enum MessageEnum {
     DomainCreateMessage(DomainCreateMessage),
     DomainUpdateMessage(DomainUpdateMessage),
     DomainDeleteMessage(DomainDeleteMessage),
+    DomainRpcRequest(DomainRpcRequest),
+    DomainRpcResponse(DomainRpcResponse),
 }
 
 /// Message format for profile creation requests
@@ -513,5 +520,107 @@ impl DomainDeleteMessage {
 impl Message for DomainDeleteMessage {
     fn to_message(&self) -> MessageEnum {
         MessageEnum::DomainDeleteMessage(self.clone())
+    }
+}
+
+/// RPC request message for domain queries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainRpcRequest {
+    pub request_id: String,
+    pub request_type: DomainRpcRequestType,
+}
+
+/// Types of domain RPC requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DomainRpcRequestType {
+    ListDomains,
+    GetDomain { domain: String },
+}
+
+impl DomainRpcRequest {
+    /// Create a new domain list request
+    pub fn list_domains(request_id: String) -> Self {
+        Self {
+            request_id,
+            request_type: DomainRpcRequestType::ListDomains,
+        }
+    }
+
+    /// Create a new domain get request
+    pub fn get_domain(request_id: String, domain: String) -> Self {
+        Self {
+            request_id,
+            request_type: DomainRpcRequestType::GetDomain { domain },
+        }
+    }
+}
+
+impl Message for DomainRpcRequest {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::DomainRpcRequest(self.clone())
+    }
+}
+
+/// RPC response message for domain queries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainRpcResponse {
+    pub request_id: String,
+    pub result: DomainRpcResult,
+}
+
+/// Results of domain RPC requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DomainRpcResult {
+    DomainList { domains: Vec<DomainInfo> },
+    DomainDetails { domain: Option<DomainInfo> },
+    Error { message: String },
+}
+
+/// Domain information for RPC responses
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainInfo {
+    pub domain: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub contact_email: Option<String>,
+    pub registration_mode: String,
+    pub authorized_fetch: bool,
+    pub max_note_length: Option<i32>,
+    pub max_file_size: Option<i64>,
+    pub allowed_file_types: Option<Vec<String>>,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl DomainRpcResponse {
+    /// Create a domain list response
+    pub fn domain_list(request_id: String, domains: Vec<DomainInfo>) -> Self {
+        Self {
+            request_id,
+            result: DomainRpcResult::DomainList { domains },
+        }
+    }
+
+    /// Create a domain details response
+    pub fn domain_details(request_id: String, domain: Option<DomainInfo>) -> Self {
+        Self {
+            request_id,
+            result: DomainRpcResult::DomainDetails { domain },
+        }
+    }
+
+    /// Create an error response
+    pub fn error(request_id: String, message: String) -> Self {
+        Self {
+            request_id,
+            result: DomainRpcResult::Error { message },
+        }
+    }
+}
+
+impl Message for DomainRpcResponse {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::DomainRpcResponse(self.clone())
     }
 }
