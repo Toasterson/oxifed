@@ -5,6 +5,7 @@
 use lapin::protocol::basic::AMQPProperties;
 use lapin::{Connection, ConnectionProperties, options::BasicPublishOptions};
 use miette::{IntoDiagnostic, Result};
+use oxifed::messaging::EXCHANGE_INTERNAL_PUBLISH;
 use oxifed::messaging::Message;
 use serde::Serialize;
 use thiserror::Error;
@@ -47,17 +48,17 @@ impl LavinMQClient {
         .into_diagnostic()
         .map_err(|e| miette::miette!("Failed to connect to LavinMQ: {}", e))?;
 
-        // Initialize the oxifed.activities exchange
+        // Initialize the exchange
         let channel = connection
             .create_channel()
             .await
             .into_diagnostic()
             .map_err(|e| miette::miette!("Failed to create channel: {}", e))?;
 
-        // Declare the oxifed.activities exchange if it doesn't exist
+        // Declare the exchange if it doesn't exist
         channel
             .exchange_declare(
-                "oxifed.activities",
+                EXCHANGE_INTERNAL_PUBLISH,
                 lapin::ExchangeKind::Fanout,
                 lapin::options::ExchangeDeclareOptions {
                     durable: true,
@@ -82,10 +83,10 @@ impl LavinMQClient {
         // Serialize the message to JSON
         let payload = serde_json::to_vec(&message.to_message())?;
 
-        // Publish the message to the oxifed.publish exchange
+        // Publish the message to the exchange
         channel
             .basic_publish(
-                "oxifed.activities", // exchange
+                EXCHANGE_INTERNAL_PUBLISH, // exchange
                 "",
                 BasicPublishOptions::default(),
                 &payload,

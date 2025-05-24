@@ -17,10 +17,15 @@ use oxifed::messaging::{
     NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
     ProfileDeleteMessage, ProfileUpdateMessage,
 };
+use oxifed::messaging::{EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INTERNAL_PUBLISH};
 use serde::de::Error;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
+
+/// Constants for RabbitMQ queue names
+pub const QUEUE_ACTIVITIES: &str = "domainservd.oxifed.activities";
+pub const CONSUMER_TAG: &str = "domainservd-activities-consumer";
 
 /// RabbitMQ error types
 #[derive(Error, Debug)]
@@ -68,7 +73,7 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
     // Declare the activities exchange - fanout style for broadcasting messages
     channel
         .exchange_declare(
-            "oxifed.activities",
+            EXCHANGE_INTERNAL_PUBLISH,
             ExchangeKind::Fanout,
             ExchangeDeclareOptions {
                 durable: true,
@@ -81,7 +86,7 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
     // Declare the publish exchange for ActivityPub messages
     channel
         .exchange_declare(
-            "oxifed.publish",
+            EXCHANGE_ACTIVITYPUB_PUBLISH,
             ExchangeKind::Fanout,
             ExchangeDeclareOptions {
                 durable: true,
@@ -94,7 +99,7 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
     // Declare the activities queue
     channel
         .queue_declare(
-            "domainservd.oxifed.activities",
+            QUEUE_ACTIVITIES,
             QueueDeclareOptions {
                 durable: true,
                 auto_delete: false,
@@ -108,8 +113,8 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
     // Bind the queue to the activities exchange
     channel
         .queue_bind(
-            "domainservd.oxifed.activities",
-            "oxifed.activities",
+            QUEUE_ACTIVITIES,
+            EXCHANGE_INTERNAL_PUBLISH,
             "", // routing key not needed for fanout exchanges
             QueueBindOptions::default(),
             FieldTable::default(),
@@ -133,12 +138,12 @@ async fn start_activities_consumer(pool: Pool, db: Arc<MongoDB>) -> Result<(), R
     let conn = pool.get().await?;
     let channel = conn.create_channel().await?;
 
-    info!("Starting consumer for domainservd.oxifed.activities queue");
+    info!("Starting consumer for {} queue", QUEUE_ACTIVITIES);
 
     let mut consumer = channel
         .basic_consume(
-            "domainservd.oxifed.activities",
-            "domainservd-activities-consumer",
+            QUEUE_ACTIVITIES,
+            CONSUMER_TAG,
             BasicConsumeOptions::default(),
             FieldTable::default(),
         )
@@ -217,11 +222,6 @@ async fn handle_follow(_db: &MongoDB, _msg: &FollowActivityMessage) -> Result<()
     todo!()
 }
 
-// Stub implementations for unimplemented functions
-async fn handle_activity(_db: &MongoDB, _msg: &str) -> Result<(), RabbitMQError> {
-    todo!()
-}
-
 // Helper function to publish an activity to the oxifed.activities exchange
 async fn publish_activity_to_followers(
     activity: &oxifed::Activity,
@@ -233,7 +233,7 @@ async fn publish_activity_to_followers(
     // Publish to the oxifed.publish exchange
     channel
         .basic_publish(
-            "oxifed.publish",
+            EXCHANGE_ACTIVITYPUB_PUBLISH,
             "", // no routing key for fanout exchanges
             lapin::options::BasicPublishOptions::default(),
             &activity_json,
@@ -383,10 +383,13 @@ async fn update_note_object(
     let note_id_url = url::Url::parse(&msg.id).map_err(|e| RabbitMQError::URLParse(e))?;
     let filter = mongodb::bson::doc! { "id": &note_id_url.to_string() };
 
-    let note = outbox_collection.find_one(filter.clone()).await.map_err(|e| {
-        error!("Failed to find note: {}", e);
-        RabbitMQError::DbError(crate::db::DbError::MongoError(e))
-    })?;
+    let note = outbox_collection
+        .find_one(filter.clone())
+        .await
+        .map_err(|e| {
+            error!("Failed to find note: {}", e);
+            RabbitMQError::DbError(crate::db::DbError::MongoError(e))
+        })?;
 
     let mut note = note.ok_or_else(|| {
         RabbitMQError::JsonError(serde_json::Error::custom(format!(
@@ -530,10 +533,10 @@ async fn create_note_object(
         &username,
         note_id_uuid.to_string()
     );
-    
+
     // Parse the note ID into a URL
     let note_id_url = url::Url::parse(&note_id).map_err(|e| RabbitMQError::URLParse(e))?;
-    
+
     // Check if a note with this ID already exists
     let outbox_collection = db.outbox_collection(&username);
     let existing_note = outbox_collection
@@ -543,11 +546,11 @@ async fn create_note_object(
             error!("Failed to check for existing note: {}", e);
             RabbitMQError::DbError(crate::db::DbError::MongoError(e))
         })?;
-        
+
     if existing_note.is_some() {
         error!("Note with ID '{}' already exists", note_id);
         return Err(RabbitMQError::JsonError(serde_json::Error::custom(
-            format!("Note with ID '{}' already exists", note_id)
+            format!("Note with ID '{}' already exists", note_id),
         )));
     }
 
@@ -719,7 +722,7 @@ async fn create_person_object(
     // Create the actor ID and check if it already exists
     let actor_id = format!("https://{}/u/{}", &domain, &username);
     let actor_collection = db.actors_collection();
-    
+
     // Check if an actor with this ID already exists
     let existing_actor = actor_collection
         .find_one(mongodb::bson::doc! { "id": &actor_id })
@@ -728,11 +731,11 @@ async fn create_person_object(
             error!("Failed to check for existing actor: {}", e);
             RabbitMQError::DbError(crate::db::DbError::MongoError(e))
         })?;
-        
+
     if existing_actor.is_some() {
         error!("Actor with ID '{}' already exists", actor_id);
         return Err(RabbitMQError::JsonError(serde_json::Error::custom(
-            format!("Actor with ID '{}' already exists", actor_id)
+            format!("Actor with ID '{}' already exists", actor_id),
         )));
     }
 
@@ -797,7 +800,10 @@ async fn create_webfinger_profile(
             formatted_subject
         );
         return Err(RabbitMQError::JsonError(serde_json::Error::custom(
-            format!("Profile with subject '{}' already exists", formatted_subject)
+            format!(
+                "Profile with subject '{}' already exists",
+                formatted_subject
+            ),
         )));
     }
 

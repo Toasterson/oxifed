@@ -7,6 +7,10 @@ use crate::{Attachment, ImageAttachment};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Constants for RabbitMQ Exchange names
+pub const EXCHANGE_INTERNAL_PUBLISH: &str = "oxifed.internal.publish";
+pub const EXCHANGE_ACTIVITYPUB_PUBLISH: &str = "oxifed.activitypub.publish";
+
 /// Message trait that must be implemented by all message types
 pub trait Message {
     fn to_message(&self) -> MessageEnum;
