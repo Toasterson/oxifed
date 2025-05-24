@@ -346,23 +346,110 @@ pub struct Project {
 
 ## 6. Security Considerations
 
-### 6.1 Authentication & Authorization
-- **HTTP Signatures**: Standard ActivityPub authentication
-- **Domain Verification**: Cryptographic proof of domain ownership
-- **Rate Limiting**: Per-actor and per-domain rate limiting
-- **Content Validation**: Strict input validation and sanitization
+### 6.1 HTTP Signature Authentication
 
-### 6.2 Content Safety
+Oxifed implements a robust HTTP signature system following ActivityPub best practices and RFC 9421, with backward compatibility for existing implementations.
+
+#### Signature Profile and Standards Compliance
+
+- **Primary Algorithm**: RSA-SHA256 (2048-bit minimum, 4096-bit recommended)
+- **Modern Support**: Ed25519 for new installations where supported
+- **Compatibility**: Cavage-12 draft with `hs2019` algorithm placeholder
+- **Headers**: `(request-target)`, `host`, `date`, `digest` (for POST requests)
+- **Timestamp Window**: 1 hour ± 5 minutes to account for clock skew
+
+#### Double-Knocking Implementation
+
+To ensure maximum compatibility across the fediverse, Oxifed implements "double-knocking":
+
+1. **Primary Attempt**: Try cavage-12 with `hs2019` algorithm
+2. **Fallback**: Attempt RFC 9421 if primary fails  
+3. **Algorithm-Specific**: Try explicit algorithms (rsa-sha256, rsa-sha512, ed25519)
+4. **Version Detection**: Use presence of `Signature-Input` header to detect newer versions
+
+#### Authorized Fetch Support
+
+- **Secure Mode**: Require HTTP signatures on all GET requests
+- **Instance Actor**: Dedicated server-level actor to prevent signature deadlocks
+- **Access Control**: Domain-level and user-level blocking enforcement
+- **Caching Compatibility**: Proper `Vary` header usage for signature-dependent responses
+
+### 6.2 Public Key Infrastructure (PKI)
+
+Oxifed implements a hierarchical PKI system enabling user key autonomy while maintaining domain authority.
+
+#### Trust Hierarchy
+
+```
+Master Key (Root Authority)
+├── Signs domain keys during registration
+├── Emergency recovery capabilities
+└── HSM storage recommended
+
+Domain Keys (Per-Domain Authority)  
+├── Signed by master key
+├── Signs user and instance actor keys
+└── Domain-specific certificate authority
+
+User Keys (Individual Identity)
+├── User-provided or server-generated
+├── Signed by domain key when verified
+└── Used for all ActivityPub activities
+
+Instance Actor Keys (System Operations)
+├── Server-level authority
+├── Signed by domain key
+└── Handles authorized fetch and system tasks
+```
+
+#### Bring Your Own Key (BYOK) Support
+
+Users can import their existing cryptographic keys:
+
+- **Key Import**: Support for RSA (2048+ bit) and Ed25519 keys
+- **Domain Verification**: Cryptographic proof of domain ownership via challenge-response
+- **Trust Levels**: Clear distinction between unverified, domain-verified, and master-signed keys
+- **Key Rotation**: User-controlled key rotation with ActivityPub Update activities
+- **Recovery Options**: Multiple recovery mechanisms for lost private keys
+
+#### PKI Endpoints
+
+Well-known endpoints for key discovery and verification:
+
+- `/.well-known/oxifed/master-key` - Root public key and metadata
+- `/.well-known/oxifed/domain-key` - Domain authority key with master signature
+- `/.well-known/oxifed/pki-info` - Complete trust hierarchy information
+- `/.well-known/oxifed/trust-chain` - Verification chain for any key
+
+### 6.3 Authentication & Authorization
+
+- **Multi-Level Trust**: PKI-based trust levels affect authorization decisions
+- **Domain Verification**: Cryptographic proof of domain ownership
+- **Rate Limiting**: Trust-level aware rate limiting (verified users get higher limits)
+- **Content Validation**: Strict input validation and sanitization
+- **Signature Caching**: LRU cache for signature verification results
+
+### 6.4 Content Safety
 - **Moderation Tools**: Automated and manual content moderation
-- **Spam Prevention**: Machine learning-based spam detection
+- **Spam Prevention**: Machine learning-based spam detection with signature trust factors
 - **Content Filtering**: User-configurable content filtering
 - **Report System**: Community-driven content reporting
+- **Reputation System**: Trust-level integration with content visibility
 
-### 6.3 Privacy Protection
+### 6.5 Privacy Protection
 - **Data Minimization**: Collect only necessary data
 - **User Control**: Granular privacy settings and data export
 - **Encryption**: At-rest and in-transit data encryption
+- **Key Escrow**: Optional user key backup with domain authority
 - **Compliance**: GDPR and other privacy regulation compliance
+
+### 6.6 Security Monitoring and Incident Response
+
+- **Signature Analytics**: Monitor signature verification patterns for anomalies
+- **Key Rotation Tracking**: Automated detection of suspicious key changes
+- **Compromise Detection**: Machine learning models for detecting compromised accounts
+- **Emergency Procedures**: Rapid key revocation and recovery protocols
+- **Audit Logging**: Comprehensive logging of all cryptographic operations
 
 ## 7. Scalability & Performance
 
