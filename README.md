@@ -1,55 +1,156 @@
-# Oxifed ActivityPub Platform
+<div align="center">
 
-A comprehensive, modular ActivityPub platform for building federated social applications including microblogging, long-form blogging, and personal portfolio sites.
+# 🌐 Oxifed ActivityPub Platform
+
+[![CI/CD Pipeline](https://github.com/Toasterson/oxifed/workflows/CI/CD%20Pipeline/badge.svg)](https://github.com/Toasterson/oxifed/actions)
+[![Security Audit](https://github.com/Toasterson/oxifed/workflows/Security%20Audit/badge.svg)](https://github.com/Toasterson/oxifed/actions)
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
+[![Rust Version](https://img.shields.io/badge/rust-1.70+-blue.svg)](https://www.rust-lang.org)
+[![ActivityPub](https://img.shields.io/badge/ActivityPub-compliant-purple.svg)](https://www.w3.org/TR/activitypub/)
+[![GitHub Sponsors](https://img.shields.io/badge/sponsor-❤️-ff69b4.svg)](https://github.com/sponsors/Toasterson)
+
+**A comprehensive, modular ActivityPub platform for building federated social applications**
+
+*Supporting microblogging, long-form blogging, and personal portfolio sites*
+
+[🚀 Quick Start](#-quick-start) • [📚 Documentation](#-documentation) • [🏗️ Architecture](#️-core-components) • [🤝 Contributing](.github/CONTRIBUTING.md) • [💬 Community](#-community)
+
+</div>
+
+---
+
+## ✨ Features
+
+<table>
+<tr>
+<td>
+
+🔗 **Federation Ready**
+- Full ActivityPub compliance
+- Compatible with Mastodon, Pleroma, PeerTube
+- Multi-domain support
+
+</td>
+<td>
+
+🛡️ **Secure by Design**
+- HTTP signature authentication
+- PKI-based trust system
+- Rate limiting & monitoring
+
+</td>
+</tr>
+<tr>
+<td>
+
+📱 **Multi-Application**
+- Microblogging (Twitter-like)
+- Blog platform (Medium-like)
+- Portfolio sites
+
+</td>
+<td>
+
+⚡ **High Performance**
+- Rust-powered backend
+- Async message processing
+- Horizontal scaling ready
+
+</td>
+</tr>
+</table>
 
 ## 📚 Documentation
 
-- **[Design Document](DESIGN.md)** - Complete platform architecture and feature specifications
-- **[Technical Architecture](ARCHITECTURE.md)** - Detailed implementation specifications and system design
+| Document | Description |
+|----------|-------------|
+| 📋 [**Design Document**](DESIGN.md) | Complete platform architecture and feature specifications |
+| 🏗️ [**Technical Architecture**](ARCHITECTURE.md) | Detailed implementation specifications and system design |
+| 🤝 [**Contributing Guide**](.github/CONTRIBUTING.md) | How to contribute to the project |
+| 📝 [**Changelog**](CHANGELOG.md) | Release notes and version history |
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Rust 1.70+
-- Docker & Docker Compose
-- MongoDB 6.0+
-- RabbitMQ 3.11+
+
+| Requirement | Version | Purpose |
+|-------------|---------|---------|
+| 🦀 Rust | 1.70+ | Core platform development |
+| 🐳 Docker & Docker Compose | Latest | Development environment |
+| 🍃 MongoDB | 6.0+ | Primary database |
+| 🐰 RabbitMQ | 3.11+ | Message queue system |
 
 ### Running the Platform
 
-1. **Start infrastructure services:**
-   ```bash
-   docker-compose up -d mongodb lavinmq
-   ```
+<details>
+<summary>🐳 <strong>Step 1: Start Infrastructure Services</strong></summary>
 
-2. **Build and run the core daemons:**
-   ```bash
-   # Build all components
-   cargo build --release
-   
-   # Run domainservd (in one terminal)
-   cargo run --bin domainservd
-   
-   # Run publisherd (in another terminal)  
-   cargo run --bin publisherd
-   ```
+```bash
+docker-compose up -d mongodb lavinmq
+```
 
-3. **Test with CLI tool:**
-   ```bash
-   # Register a domain first
-   cargo run --bin oxiadm -- domain create example.com \
-     --name "Example Domain" \
-     --description "A test domain" \
-     --contact-email "admin@example.com"
-   
-   # Create a user profile
-   cargo run --bin oxiadm -- profile create alice@example.com --summary "Hello ActivityPub!"
-   
-   # Publish a note
-   cargo run --bin oxiadm -- note create alice@example.com "Hello, federated world!"
-   ```
+This starts MongoDB and RabbitMQ in the background.
+
+</details>
+
+<details>
+<summary>🔨 <strong>Step 2: Build and Run Core Daemons</strong></summary>
+
+```bash
+# Build all components
+cargo build --release
+
+# Terminal 1: Run domain service daemon
+cargo run --bin domainservd
+
+# Terminal 2: Run publishing daemon  
+cargo run --bin publisherd
+```
+
+</details>
+
+<details>
+<summary>🧪 <strong>Step 3: Test with CLI Tool</strong></summary>
+
+```bash
+# Register a domain first
+cargo run --bin oxiadm -- domain create example.com \
+  --name "Example Domain" \
+  --description "A test domain" \
+  --contact-email "admin@example.com"
+
+# Create a user profile
+cargo run --bin oxiadm -- profile create alice@example.com \
+  --summary "Hello ActivityPub!"
+
+# Publish your first note
+cargo run --bin oxiadm -- note create alice@example.com \
+  "Hello, federated world! 🌍"
+```
+
+</details>
+
+> 💡 **Tip**: Use `cargo run --bin oxiadm -- help` to explore all available commands!
 
 ## 🏗️ Core Components
+
+<div align="center">
+
+```mermaid
+graph TB
+    A[External ActivityPub Servers] --> B[domainservd]
+    B --> C[RabbitMQ]
+    C --> D[publisherd]
+    B --> E[MongoDB]
+    F[oxiadm CLI] --> B
+    D --> A
+    
+    style B fill:#e1f5fe
+    style D fill:#f3e5f5
+    style F fill:#e8f5e8
+```
+
+</div>
 
 The platform consists of three main daemons that work together to provide ActivityPub functionality:
 
@@ -86,26 +187,120 @@ Command-line administration and testing tool:
 
 ## 🛠️ Applications Built on Oxifed
 
-The platform supports multiple application types:
+<div align="center">
 
-- **📱 Microblogging App**: Twitter/Mastodon-style short-form content sharing
-- **📝 Blog Platform**: Medium/Ghost-style long-form article publishing  
-- **💼 Portfolio Sites**: Professional portfolio and networking platform
-- **🔧 Custom Apps**: Extensible architecture for custom ActivityPub applications
+| Application Type | Description | Status |
+|------------------|-------------|---------|
+| 📱 **Microblogging** | Twitter/Mastodon-style short-form sharing | 🚧 In Progress |
+| 📝 **Blog Platform** | Medium/Ghost-style long-form publishing | 📋 Planned |
+| 💼 **Portfolio Sites** | Professional portfolio and networking | 📋 Planned |
+| 🔧 **Custom Apps** | Extensible architecture for custom needs | ✅ Available |
+
+</div>
 
 ## 🗄️ Infrastructure
 
-- **Database**: MongoDB for actor profiles, activities, and domain configuration
-- **Message Queue**: RabbitMQ with hybrid architecture:
-  - Fanout exchanges for asynchronous command processing
-  - Direct exchanges for synchronous RPC queries
-  - Request-response pattern with correlation IDs and timeouts
-- **Federation**: Full ActivityPub protocol support for interoperability with Mastodon, Pleroma, PeerTube, and other platforms
+<table>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+<th>Purpose</th>
+</tr>
+<tr>
+<td>🗃️ <strong>Database</strong></td>
+<td>MongoDB</td>
+<td>Actor profiles, activities, domain configuration</td>
+</tr>
+<tr>
+<td>📨 <strong>Message Queue</strong></td>
+<td>RabbitMQ</td>
+<td>
+• Fanout exchanges for async processing<br>
+• Direct exchanges for RPC queries<br>
+• Correlation IDs and timeouts
+</td>
+</tr>
+<tr>
+<td>🌐 <strong>Federation</strong></td>
+<td>ActivityPub</td>
+<td>Interoperability with Mastodon, Pleroma, PeerTube</td>
+</tr>
+</table>
 
 ## 📖 Getting Started
 
-1. Read the [Design Document](DESIGN.md) for a comprehensive overview
-2. Check the [Technical Architecture](ARCHITECTURE.md) for implementation details
-3. Follow the Quick Start guide above to run your first instance
-4. Register your domain using `oxiadm domain create` before creating user profiles
-5. Use `oxiadm` to create profiles and test federation with existing ActivityPub servers
+<div align="center">
+
+```mermaid
+graph LR
+    A[📖 Read Docs] --> B[🚀 Quick Start]
+    B --> C[🏗️ Register Domain]
+    C --> D[👤 Create Profile]
+    D --> E[🌐 Test Federation]
+    
+    style A fill:#e3f2fd
+    style B fill:#f1f8e9
+    style C fill:#fff3e0
+    style D fill:#fce4ec
+    style E fill:#e8f5e8
+```
+
+</div>
+
+### 🛤️ Learning Path
+
+1. 📋 **Read the [Design Document](DESIGN.md)** - Get a comprehensive overview
+2. 🏗️ **Check [Technical Architecture](ARCHITECTURE.md)** - Understand implementation details  
+3. 🚀 **Follow the [Quick Start](#-quick-start)** - Run your first instance
+4. 🏷️ **Register your domain** using `oxiadm domain create`
+5. 👤 **Create user profiles** and test federation
+6. 🤝 **Join the community** and start contributing!
+
+### 🎯 Next Steps
+
+- 🐛 **Found a bug?** [Report it](.github/ISSUE_TEMPLATE/bug_report.md)
+- 💡 **Have an idea?** [Request a feature](.github/ISSUE_TEMPLATE/feature_request.md)
+- 🤝 **Want to contribute?** Read our [Contributing Guide](.github/CONTRIBUTING.md)
+- 💬 **Need help?** Check our [Discussions](../../discussions)
+
+## 🤝 Community
+
+<div align="center">
+
+[![Contributors](https://img.shields.io/github/contributors/Toasterson/oxifed.svg)](https://github.com/Toasterson/oxifed/graphs/contributors)
+[![Stars](https://img.shields.io/github/stars/Toasterson/oxifed.svg)](https://github.com/Toasterson/oxifed/stargazers)
+[![Forks](https://img.shields.io/github/forks/Toasterson/oxifed.svg)](https://github.com/Toasterson/oxifed/network)
+[![Issues](https://img.shields.io/github/issues/Toasterson/oxifed.svg)](https://github.com/Toasterson/oxifed/issues)
+
+**Join our growing community of developers building the future of federated social media!**
+
+[💬 Discussions](../../discussions) • [🐛 Issues](../../issues) • [🔄 Pull Requests](../../pulls) • [📖 Wiki](../../wiki)
+
+</div>
+
+## 💖 Support the Project
+
+<div align="center">
+
+If you find Oxifed useful, consider supporting its development:
+
+[![Sponsor](https://img.shields.io/badge/sponsor-❤️-ff69b4.svg)](https://github.com/sponsors/Toasterson)
+[![Star](https://img.shields.io/badge/⭐-Star%20on%20GitHub-yellow.svg)](https://github.com/Toasterson/oxifed)
+
+**Every contribution helps make federated social media better for everyone!**
+
+</div>
+
+## 📄 License
+
+This project is licensed under the [Mozilla Public License 2.0](LICENSE) - see the LICENSE file for details.
+
+---
+
+<div align="center">
+
+**Made with ❤️ by the Oxifed community**
+
+*Building a more open and decentralized web, one commit at a time.*
+
+</div>
