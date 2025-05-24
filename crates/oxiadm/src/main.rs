@@ -600,12 +600,13 @@ async fn main() -> Result<()> {
 }
 
 /// Handle Key commands via messaging
-async fn handle_key_command_messaging(
-    client: &LavinMQClient,
-    command: &KeyCommands,
-) -> Result<()> {
+async fn handle_key_command_messaging(client: &LavinMQClient, command: &KeyCommands) -> Result<()> {
     match command {
-        KeyCommands::Generate { actor, algorithm, key_size } => {
+        KeyCommands::Generate {
+            actor,
+            algorithm,
+            key_size,
+        } => {
             println!("Generating {} key for '{}'", algorithm, actor);
             if let Some(size) = key_size {
                 println!("Key size: {}", size);
@@ -613,7 +614,12 @@ async fn handle_key_command_messaging(
             println!("Key generation request sent to PKI service");
         }
 
-        KeyCommands::Import { actor, public_key, private_key, algorithm } => {
+        KeyCommands::Import {
+            actor,
+            public_key,
+            private_key,
+            algorithm,
+        } => {
             println!("Importing {} key for '{}'", algorithm, actor);
             println!("Public key: {}", public_key);
             println!("Private key: {}", private_key);
@@ -621,17 +627,30 @@ async fn handle_key_command_messaging(
         }
 
         KeyCommands::Verify { actor, domain } => {
-            println!("Initiating domain verification for '{}' on domain '{}'", actor, domain);
+            println!(
+                "Initiating domain verification for '{}' on domain '{}'",
+                actor, domain
+            );
             println!("Domain verification request sent to PKI service");
         }
 
-        KeyCommands::VerifyComplete { actor, domain, challenge_response } => {
-            println!("Completing domain verification for '{}' on domain '{}'", actor, domain);
+        KeyCommands::VerifyComplete {
+            actor,
+            domain,
+            challenge_response,
+        } => {
+            println!(
+                "Completing domain verification for '{}' on domain '{}'",
+                actor, domain
+            );
             println!("Challenge response file: {}", challenge_response);
             println!("Verification completion request sent to PKI service");
         }
 
-        KeyCommands::Rotate { actor, rotation_type } => {
+        KeyCommands::Rotate {
+            actor,
+            rotation_type,
+        } => {
             println!("Rotating key for '{}' with type '{}'", actor, rotation_type);
             println!("Key rotation request sent to PKI service");
         }
@@ -655,10 +674,7 @@ async fn handle_key_command_messaging(
 }
 
 /// Handle PKI commands via messaging
-async fn handle_pki_command_messaging(
-    client: &LavinMQClient,
-    command: &PkiCommands,
-) -> Result<()> {
+async fn handle_pki_command_messaging(client: &LavinMQClient, command: &PkiCommands) -> Result<()> {
     match command {
         PkiCommands::InitMaster { key_size, output } => {
             println!("Initializing master key with size {} bits", key_size);
@@ -680,7 +696,10 @@ async fn handle_pki_command_messaging(
         }
 
         PkiCommands::SignDomainKey { domain, master_key } => {
-            println!("Signing domain key for '{}' with master key: {}", domain, master_key);
+            println!(
+                "Signing domain key for '{}' with master key: {}",
+                domain, master_key
+            );
             println!("Domain key signing request sent to PKI service");
         }
 
@@ -689,15 +708,25 @@ async fn handle_pki_command_messaging(
             println!("Domain list request sent to PKI service");
         }
 
-        PkiCommands::RecoverMaster { recovery_token, new_master_key } => {
+        PkiCommands::RecoverMaster {
+            recovery_token,
+            new_master_key,
+        } => {
             println!("Recovering master key");
             println!("Recovery token: {}", recovery_token);
             println!("New master key: {}", new_master_key);
             println!("Master key recovery request sent to PKI service");
         }
 
-        PkiCommands::RecoverUser { actor, domain, method } => {
-            println!("Recovering user access for '{}' on domain '{}' using method '{}'", actor, domain, method);
+        PkiCommands::RecoverUser {
+            actor,
+            domain,
+            method,
+        } => {
+            println!(
+                "Recovering user access for '{}' on domain '{}' using method '{}'",
+                actor, domain, method
+            );
             println!("User recovery request sent to PKI service");
         }
     }
@@ -726,7 +755,11 @@ async fn handle_system_command_messaging(
             println!("System report request sent to system service");
         }
 
-        SystemCommands::SetDomain { domain, authorized_fetch, registration_mode } => {
+        SystemCommands::SetDomain {
+            domain,
+            authorized_fetch,
+            registration_mode,
+        } => {
             println!("Setting domain configuration for: {}", domain);
             if let Some(af) = authorized_fetch {
                 println!("Authorized fetch: {}", af);
@@ -737,7 +770,10 @@ async fn handle_system_command_messaging(
             println!("Domain configuration request sent to system service");
         }
 
-        SystemCommands::SetInstance { max_note_length, max_file_size } => {
+        SystemCommands::SetInstance {
+            max_note_length,
+            max_file_size,
+        } => {
             println!("Setting instance configuration");
             if let Some(length) = max_note_length {
                 println!("Max note length: {}", length);
@@ -759,17 +795,29 @@ async fn handle_test_command_messaging(
 ) -> Result<()> {
     match command {
         TestCommands::Signatures { actor, target } => {
-            println!("Testing HTTP signatures for '{}' to target: {}", actor, target);
+            println!(
+                "Testing HTTP signatures for '{}' to target: {}",
+                actor, target
+            );
             println!("Signature test request sent to federation service");
         }
 
-        TestCommands::Federation { actor, remote_actor } => {
-            println!("Testing federation connectivity from '{}' to '{}'", actor, remote_actor);
+        TestCommands::Federation {
+            actor,
+            remote_actor,
+        } => {
+            println!(
+                "Testing federation connectivity from '{}' to '{}'",
+                actor, remote_actor
+            );
             println!("Federation test request sent to federation service");
         }
 
         TestCommands::AuthorizedFetch { actor, target } => {
-            println!("Testing authorized fetch for '{}' to target: {}", actor, target);
+            println!(
+                "Testing authorized fetch for '{}' to target: {}",
+                actor, target
+            );
             println!("Authorized fetch test request sent to federation service");
         }
     }
@@ -1105,7 +1153,7 @@ async fn handle_domain_command_messaging(
     client: &LavinMQClient,
     command: &DomainCommands,
 ) -> Result<()> {
-    use oxifed::messaging::{DomainCreateMessage, DomainUpdateMessage, DomainDeleteMessage};
+    use oxifed::messaging::{DomainCreateMessage, DomainDeleteMessage, DomainUpdateMessage};
 
     match command {
         DomainCommands::Create {
@@ -1200,78 +1248,71 @@ async fn handle_domain_command_messaging(
             }
         }
 
-        DomainCommands::List => {
-            match client.create_rpc_client().await {
-                Ok(rpc_client) => {
-                    match rpc_client.list_domains().await {
-                        Ok(domains) => {
-                            if domains.is_empty() {
-                                println!("No domains registered");
-                            } else {
-                                println!("Registered domains:");
-                                for domain in domains {
-                                    println!("  {} - {} ({})", 
-                                        domain.domain,
-                                        domain.name.unwrap_or_else(|| "No name".to_string()),
-                                        domain.status
-                                    );
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to list domains: {}", e);
+        DomainCommands::List => match client.create_rpc_client().await {
+            Ok(rpc_client) => match rpc_client.list_domains().await {
+                Ok(domains) => {
+                    if domains.is_empty() {
+                        println!("No domains registered");
+                    } else {
+                        println!("Registered domains:");
+                        for domain in domains {
+                            println!(
+                                "  {} - {} ({})",
+                                domain.domain,
+                                domain.name.unwrap_or_else(|| "No name".to_string()),
+                                domain.status
+                            );
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to create RPC client: {}", e);
+                    eprintln!("Failed to list domains: {}", e);
                 }
+            },
+            Err(e) => {
+                eprintln!("Failed to create RPC client: {}", e);
             }
-        }
+        },
 
-        DomainCommands::Show { domain } => {
-            match client.create_rpc_client().await {
-                Ok(rpc_client) => {
-                    match rpc_client.get_domain(domain).await {
-                        Ok(Some(domain_info)) => {
-                            println!("Domain: {}", domain_info.domain);
-                            if let Some(name) = &domain_info.name {
-                                println!("Name: {}", name);
-                            }
-                            if let Some(description) = &domain_info.description {
-                                println!("Description: {}", description);
-                            }
-                            if let Some(contact_email) = &domain_info.contact_email {
-                                println!("Contact Email: {}", contact_email);
-                            }
-                            println!("Registration Mode: {}", domain_info.registration_mode);
-                            println!("Authorized Fetch: {}", domain_info.authorized_fetch);
-                            if let Some(max_note_length) = domain_info.max_note_length {
-                                println!("Max Note Length: {}", max_note_length);
-                            }
-                            if let Some(max_file_size) = domain_info.max_file_size {
-                                println!("Max File Size: {} bytes", max_file_size);
-                            }
-                            if let Some(allowed_file_types) = &domain_info.allowed_file_types {
-                                println!("Allowed File Types: {}", allowed_file_types.join(", "));
-                            }
-                            println!("Status: {}", domain_info.status);
-                            println!("Created: {}", domain_info.created_at);
-                            println!("Updated: {}", domain_info.updated_at);
-                        }
-                        Ok(None) => {
-                            println!("Domain '{}' not found", domain);
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to get domain details: {}", e);
-                        }
+        DomainCommands::Show { domain } => match client.create_rpc_client().await {
+            Ok(rpc_client) => match rpc_client.get_domain(domain).await {
+                Ok(Some(domain_info)) => {
+                    println!("Domain: {}", domain_info.domain);
+                    if let Some(name) = &domain_info.name {
+                        println!("Name: {}", name);
                     }
+                    if let Some(description) = &domain_info.description {
+                        println!("Description: {}", description);
+                    }
+                    if let Some(contact_email) = &domain_info.contact_email {
+                        println!("Contact Email: {}", contact_email);
+                    }
+                    println!("Registration Mode: {}", domain_info.registration_mode);
+                    println!("Authorized Fetch: {}", domain_info.authorized_fetch);
+                    if let Some(max_note_length) = domain_info.max_note_length {
+                        println!("Max Note Length: {}", max_note_length);
+                    }
+                    if let Some(max_file_size) = domain_info.max_file_size {
+                        println!("Max File Size: {} bytes", max_file_size);
+                    }
+                    if let Some(allowed_file_types) = &domain_info.allowed_file_types {
+                        println!("Allowed File Types: {}", allowed_file_types.join(", "));
+                    }
+                    println!("Status: {}", domain_info.status);
+                    println!("Created: {}", domain_info.created_at);
+                    println!("Updated: {}", domain_info.updated_at);
+                }
+                Ok(None) => {
+                    println!("Domain '{}' not found", domain);
                 }
                 Err(e) => {
-                    eprintln!("Failed to create RPC client: {}", e);
+                    eprintln!("Failed to get domain details: {}", e);
                 }
+            },
+            Err(e) => {
+                eprintln!("Failed to create RPC client: {}", e);
             }
-        }
+        },
     }
 
     Ok(())

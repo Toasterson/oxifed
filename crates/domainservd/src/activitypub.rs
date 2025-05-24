@@ -3,27 +3,24 @@
 //! Implements the ActivityPub server-to-server protocol endpoints including
 //! actor profiles, inboxes, outboxes, and collections.
 
-
-
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use oxifed::{
+    ActivityType, ObjectType,
     database::{
-        ActorDocument, ActivityDocument, ObjectDocument, FollowDocument,
-        ActorStatus, ActivityStatus, VisibilityLevel, FollowStatus,
-        DatabaseManager,
+        ActivityDocument, ActivityStatus, ActorDocument, ActorStatus, DatabaseManager,
+        FollowDocument, FollowStatus, ObjectDocument, VisibilityLevel,
     },
     pki::PkiManager,
-    ActivityType, ObjectType,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -83,17 +80,13 @@ pub fn activitypub_router(state: ActivityPubState) -> Router<ActivityPubState> {
         .route("/users/:username/following", get(get_following))
         .route("/users/:username/liked", get(get_liked))
         .route("/users/:username/featured", get(get_featured))
-        
         // Object endpoints
         .route("/objects/:id", get(get_object))
         .route("/activities/:id", get(get_activity))
-        
         // Shared inbox
         .route("/inbox", post(post_shared_inbox))
-        
         // Node info
         .route("/nodeinfo/2.0", get(get_nodeinfo))
-        
         .with_state(state)
 }
 
@@ -106,7 +99,11 @@ async fn get_actor(
     debug!("Getting actor profile for username: {}", username);
 
     // Find actor in database
-    let actor_doc = match state.db.find_actor_by_username(&username, &state.domain).await {
+    let actor_doc = match state
+        .db
+        .find_actor_by_username(&username, &state.domain)
+        .await
+    {
         Ok(Some(actor)) => actor,
         Ok(None) => {
             warn!("Actor not found: {}@{}", username, state.domain);
@@ -150,7 +147,7 @@ async fn get_actor(
             "url": url
         })),
         "image": actor_doc.image.map(|url| json!({
-            "type": "Image", 
+            "type": "Image",
             "url": url
         })),
         "inbox": actor_doc.inbox,
@@ -174,7 +171,8 @@ async fn get_actor(
         StatusCode::OK,
         [("Content-Type", "application/activity+json")],
         Json(actor_json),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Handle incoming activities to user inbox
@@ -185,7 +183,10 @@ async fn post_inbox(
     Json(activity): Json<Value>,
 ) -> Result<Response, StatusCode> {
     info!("Received activity for user inbox: {}", username);
-    debug!("Activity payload: {}", serde_json::to_string_pretty(&activity).unwrap_or_default());
+    debug!(
+        "Activity payload: {}",
+        serde_json::to_string_pretty(&activity).unwrap_or_default()
+    );
 
     // Verify HTTP signature
     if let Err(e) = verify_http_signature(&headers, &state).await {
@@ -194,7 +195,11 @@ async fn post_inbox(
     }
 
     // Verify actor exists and is active
-    let actor_doc = match state.db.find_actor_by_username(&username, &state.domain).await {
+    let actor_doc = match state
+        .db
+        .find_actor_by_username(&username, &state.domain)
+        .await
+    {
         Ok(Some(actor)) => actor,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -221,7 +226,10 @@ async fn post_shared_inbox(
     Json(activity): Json<Value>,
 ) -> Result<Response, StatusCode> {
     info!("Received activity for shared inbox");
-    debug!("Activity payload: {}", serde_json::to_string_pretty(&activity).unwrap_or_default());
+    debug!(
+        "Activity payload: {}",
+        serde_json::to_string_pretty(&activity).unwrap_or_default()
+    );
 
     // Verify HTTP signature
     if let Err(e) = verify_http_signature(&headers, &state).await {
@@ -249,7 +257,11 @@ async fn get_outbox(
     debug!("Getting outbox for user: {}", username);
 
     // Find actor
-    let actor_doc = match state.db.find_actor_by_username(&username, &state.domain).await {
+    let actor_doc = match state
+        .db
+        .find_actor_by_username(&username, &state.domain)
+        .await
+    {
         Ok(Some(actor)) => actor,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -263,7 +275,11 @@ async fn get_outbox(
     let offset = 0; // TODO: Implement proper pagination
 
     // Get actor's objects
-    let objects = match state.db.get_actor_outbox(&actor_doc.actor_id, limit, offset).await {
+    let objects = match state
+        .db
+        .get_actor_outbox(&actor_doc.actor_id, limit, offset)
+        .await
+    {
         Ok(objects) => objects,
         Err(e) => {
             error!("Failed to get actor outbox: {}", e);
@@ -272,29 +288,30 @@ async fn get_outbox(
     };
 
     // Convert to ActivityPub format
-    let items: Vec<Value> = objects.into_iter().map(|obj| {
-        json!({
-            "type": "Create",
-            "id": format!("{}/activities/{}", actor_doc.actor_id, Uuid::new_v4()),
-            "actor": actor_doc.actor_id,
-            "published": obj.published.unwrap_or(obj.created_at).to_rfc3339(),
-            "object": {
-                "type": format!("{:?}", obj.object_type),
-                "id": obj.object_id,
-                "attributedTo": obj.attributed_to,
-                "content": obj.content,
-                "summary": obj.summary,
+    let items: Vec<Value> = objects
+        .into_iter()
+        .map(|obj| {
+            json!({
+                "type": "Create",
+                "id": format!("{}/activities/{}", actor_doc.actor_id, Uuid::new_v4()),
+                "actor": actor_doc.actor_id,
                 "published": obj.published.unwrap_or(obj.created_at).to_rfc3339(),
-                "to": obj.to,
-                "cc": obj.cc
-            }
+                "object": {
+                    "type": format!("{:?}", obj.object_type),
+                    "id": obj.object_id,
+                    "attributedTo": obj.attributed_to,
+                    "content": obj.content,
+                    "summary": obj.summary,
+                    "published": obj.published.unwrap_or(obj.created_at).to_rfc3339(),
+                    "to": obj.to,
+                    "cc": obj.cc
+                }
+            })
         })
-    }).collect();
+        .collect();
 
     let collection = ActivityPubCollection {
-        context: vec![
-            "https://www.w3.org/ns/activitystreams".to_string(),
-        ],
+        context: vec!["https://www.w3.org/ns/activitystreams".to_string()],
         collection_type: "OrderedCollection".to_string(),
         id: actor_doc.outbox,
         total_items: Some(actor_doc.statuses_count as u64),
@@ -311,7 +328,8 @@ async fn get_outbox(
         StatusCode::OK,
         [("Content-Type", "application/activity+json")],
         Json(collection),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Post to actor's outbox (C2S)
@@ -336,7 +354,11 @@ async fn get_followers(
 ) -> Result<Response, StatusCode> {
     debug!("Getting followers for user: {}", username);
 
-    let actor_doc = match state.db.find_actor_by_username(&username, &state.domain).await {
+    let actor_doc = match state
+        .db
+        .find_actor_by_username(&username, &state.domain)
+        .await
+    {
         Ok(Some(actor)) => actor,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -372,7 +394,8 @@ async fn get_followers(
         StatusCode::OK,
         [("Content-Type", "application/activity+json")],
         Json(collection),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Get actor's following
@@ -383,7 +406,11 @@ async fn get_following(
 ) -> Result<Response, StatusCode> {
     debug!("Getting following for user: {}", username);
 
-    let actor_doc = match state.db.find_actor_by_username(&username, &state.domain).await {
+    let actor_doc = match state
+        .db
+        .find_actor_by_username(&username, &state.domain)
+        .await
+    {
         Ok(Some(actor)) => actor,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -419,7 +446,8 @@ async fn get_following(
         StatusCode::OK,
         [("Content-Type", "application/activity+json")],
         Json(collection),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Get actor's liked collection
@@ -438,7 +466,11 @@ async fn get_featured(
 ) -> Result<Response, StatusCode> {
     debug!("Getting featured posts for user: {}", username);
 
-    let actor_doc = match state.db.find_actor_by_username(&username, &state.domain).await {
+    let actor_doc = match state
+        .db
+        .find_actor_by_username(&username, &state.domain)
+        .await
+    {
         Ok(Some(actor)) => actor,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -452,7 +484,9 @@ async fn get_featured(
     let collection = ActivityPubCollection {
         context: vec!["https://www.w3.org/ns/activitystreams".to_string()],
         collection_type: "OrderedCollection".to_string(),
-        id: actor_doc.featured.unwrap_or_else(|| format!("{}/featured", actor_doc.actor_id)),
+        id: actor_doc
+            .featured
+            .unwrap_or_else(|| format!("{}/featured", actor_doc.actor_id)),
         total_items: Some(0),
         ordered_items: Some(vec![]),
         items: None,
@@ -467,7 +501,8 @@ async fn get_featured(
         StatusCode::OK,
         [("Content-Type", "application/activity+json")],
         Json(collection),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Get individual object
@@ -478,7 +513,7 @@ async fn get_object(
     debug!("Getting object: {}", id);
 
     let object_id = format!("https://{}/objects/{}", state.domain, id);
-    
+
     let object_doc = match state.db.find_object_by_id(&object_id).await {
         Ok(Some(obj)) => obj,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
@@ -509,7 +544,8 @@ async fn get_object(
         StatusCode::OK,
         [("Content-Type", "application/activity+json")],
         Json(object_json),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Get individual activity
@@ -520,7 +556,7 @@ async fn get_activity(
     debug!("Getting activity: {}", id);
 
     let activity_id = format!("https://{}/activities/{}", state.domain, id);
-    
+
     let activity_doc = match state.db.find_activity_by_id(&activity_id).await {
         Ok(Some(activity)) => activity,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
@@ -546,13 +582,12 @@ async fn get_activity(
         StatusCode::OK,
         [("Content-Type", "application/activity+json")],
         Json(activity_json),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Get node info
-async fn get_nodeinfo(
-    State(state): State<ActivityPubState>,
-) -> Result<Response, StatusCode> {
+async fn get_nodeinfo(State(state): State<ActivityPubState>) -> Result<Response, StatusCode> {
     let nodeinfo = json!({
         "version": "2.0",
         "software": {
@@ -579,7 +614,8 @@ async fn get_nodeinfo(
         StatusCode::OK,
         [("Content-Type", "application/json")],
         Json(nodeinfo),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Verify HTTP signature
@@ -598,11 +634,15 @@ async fn process_incoming_activity(
     actor: &ActorDocument,
     state: &ActivityPubState,
 ) -> Result<(), String> {
-    let activity_type = activity.get("type")
+    let activity_type = activity
+        .get("type")
         .and_then(|t| t.as_str())
         .ok_or("Missing activity type")?;
 
-    info!("Processing {} activity for {}", activity_type, actor.actor_id);
+    info!(
+        "Processing {} activity for {}",
+        activity_type, actor.actor_id
+    );
 
     match activity_type {
         "Follow" => handle_follow_activity(activity, actor, state).await,
@@ -624,7 +664,8 @@ async fn process_shared_inbox_activity(
     activity: &Value,
     state: &ActivityPubState,
 ) -> Result<(), String> {
-    let activity_type = activity.get("type")
+    let activity_type = activity
+        .get("type")
         .and_then(|t| t.as_str())
         .ok_or("Missing activity type")?;
 
@@ -646,11 +687,15 @@ async fn handle_follow_activity(
     target_actor: &ActorDocument,
     state: &ActivityPubState,
 ) -> Result<(), String> {
-    let follower = activity.get("actor")
+    let follower = activity
+        .get("actor")
         .and_then(|a| a.as_str())
         .ok_or("Missing follower actor")?;
 
-    info!("Processing follow from {} to {}", follower, target_actor.actor_id);
+    info!(
+        "Processing follow from {} to {}",
+        follower, target_actor.actor_id
+    );
 
     // Create follow relationship
     let follow_doc = FollowDocument {
@@ -658,7 +703,8 @@ async fn handle_follow_activity(
         follower: follower.to_string(),
         following: target_actor.actor_id.clone(),
         status: FollowStatus::Pending,
-        activity_id: activity.get("id")
+        activity_id: activity
+            .get("id")
             .and_then(|id| id.as_str())
             .unwrap_or("unknown")
             .to_string(),
@@ -667,7 +713,10 @@ async fn handle_follow_activity(
         responded_at: None,
     };
 
-    state.db.insert_follow(follow_doc).await
+    state
+        .db
+        .insert_follow(follow_doc)
+        .await
         .map_err(|e| format!("Failed to store follow: {}", e))?;
 
     // Auto-accept for now (TODO: Check actor preferences)
@@ -684,7 +733,10 @@ async fn handle_follow_activity(
     publish_activity_message(&accept_activity, state).await?;
 
     // Update follow status
-    state.db.update_follow_status(follower, &target_actor.actor_id, FollowStatus::Accepted).await
+    state
+        .db
+        .update_follow_status(follower, &target_actor.actor_id, FollowStatus::Accepted)
+        .await
         .map_err(|e| format!("Failed to update follow status: {}", e))?;
 
     Ok(())
@@ -696,19 +748,25 @@ async fn handle_undo_activity(
     actor: &ActorDocument,
     state: &ActivityPubState,
 ) -> Result<(), String> {
-    let object = activity.get("object")
-        .ok_or("Missing undo object")?;
+    let object = activity.get("object").ok_or("Missing undo object")?;
 
     if let Some(object_type) = object.get("type").and_then(|t| t.as_str()) {
         match object_type {
             "Follow" => {
-                let following = object.get("object")
+                let following = object
+                    .get("object")
                     .and_then(|o| o.as_str())
                     .ok_or("Missing follow target")?;
-                
-                info!("Processing unfollow from {} to {}", actor.actor_id, following);
-                
-                state.db.update_follow_status(&actor.actor_id, following, FollowStatus::Cancelled).await
+
+                info!(
+                    "Processing unfollow from {} to {}",
+                    actor.actor_id, following
+                );
+
+                state
+                    .db
+                    .update_follow_status(&actor.actor_id, following, FollowStatus::Cancelled)
+                    .await
                     .map_err(|e| format!("Failed to update follow status: {}", e))?;
             }
             _ => {
@@ -726,8 +784,7 @@ async fn handle_create_activity(
     actor: &ActorDocument,
     state: &ActivityPubState,
 ) -> Result<(), String> {
-    let object = activity.get("object")
-        .ok_or("Missing create object")?;
+    let object = activity.get("object").ok_or("Missing create object")?;
 
     if let Some(object_type) = object.get("type").and_then(|t| t.as_str()) {
         match object_type {
@@ -789,34 +846,38 @@ async fn handle_announce_activity(
 }
 
 /// Store activity in database
-async fn store_activity(
-    activity: &Value,
-    state: &ActivityPubState,
-) -> Result<(), String> {
+async fn store_activity(activity: &Value, state: &ActivityPubState) -> Result<(), String> {
     let activity_doc = ActivityDocument {
         id: None,
-        activity_id: activity.get("id")
+        activity_id: activity
+            .get("id")
             .and_then(|id| id.as_str())
             .unwrap_or(&format!("unknown-{}", Uuid::new_v4()))
             .to_string(),
         activity_type: parse_activity_type(activity.get("type")),
-        actor: activity.get("actor")
+        actor: activity
+            .get("actor")
             .and_then(|a| a.as_str())
             .unwrap_or("unknown")
             .to_string(),
-        object: activity.get("object")
+        object: activity
+            .get("object")
             .and_then(|o| o.as_str())
             .map(|s| s.to_string()),
-        target: activity.get("target")
+        target: activity
+            .get("target")
             .and_then(|t| t.as_str())
             .map(|s| s.to_string()),
-        name: activity.get("name")
+        name: activity
+            .get("name")
             .and_then(|n| n.as_str())
             .map(|s| s.to_string()),
-        summary: activity.get("summary")
+        summary: activity
+            .get("summary")
             .and_then(|s| s.as_str())
             .map(|s| s.to_string()),
-        published: activity.get("published")
+        published: activity
+            .get("published")
             .and_then(|p| p.as_str())
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc)),
@@ -834,46 +895,54 @@ async fn store_activity(
         error: None,
     };
 
-    state.db.insert_activity(activity_doc).await
+    state
+        .db
+        .insert_activity(activity_doc)
+        .await
         .map_err(|e| format!("Failed to store activity: {}", e))?;
 
     Ok(())
 }
 
 /// Store note object in database
-async fn store_note_object(
-    object: &Value,
-    state: &ActivityPubState,
-) -> Result<(), String> {
+async fn store_note_object(object: &Value, state: &ActivityPubState) -> Result<(), String> {
     let object_doc = ObjectDocument {
         id: None,
-        object_id: object.get("id")
+        object_id: object
+            .get("id")
             .and_then(|id| id.as_str())
             .unwrap_or(&format!("unknown-{}", Uuid::new_v4()))
             .to_string(),
         object_type: ObjectType::Note,
-        attributed_to: object.get("attributedTo")
+        attributed_to: object
+            .get("attributedTo")
             .and_then(|a| a.as_str())
             .unwrap_or("unknown")
             .to_string(),
-        content: object.get("content")
+        content: object
+            .get("content")
             .and_then(|c| c.as_str())
             .map(|s| s.to_string()),
-        summary: object.get("summary")
+        summary: object
+            .get("summary")
             .and_then(|s| s.as_str())
             .map(|s| s.to_string()),
-        name: object.get("name")
+        name: object
+            .get("name")
             .and_then(|n| n.as_str())
             .map(|s| s.to_string()),
         media_type: Some("text/html".to_string()),
-        url: object.get("url")
+        url: object
+            .get("url")
             .and_then(|u| u.as_str())
             .map(|s| s.to_string()),
-        published: object.get("published")
+        published: object
+            .get("published")
             .and_then(|p| p.as_str())
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc)),
-        updated: object.get("updated")
+        updated: object
+            .get("updated")
             .and_then(|u| u.as_str())
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc)),
@@ -882,19 +951,21 @@ async fn store_note_object(
         bto: extract_string_array(object.get("bto")),
         bcc: extract_string_array(object.get("bcc")),
         audience: extract_string_array(object.get("audience")),
-        in_reply_to: object.get("inReplyTo")
+        in_reply_to: object
+            .get("inReplyTo")
             .and_then(|r| r.as_str())
             .map(|s| s.to_string()),
-        conversation: object.get("conversation")
+        conversation: object
+            .get("conversation")
             .and_then(|c| c.as_str())
             .map(|s| s.to_string()),
-        tag: None, // TODO: Parse tags
+        tag: None,        // TODO: Parse tags
         attachment: None, // TODO: Parse attachments
-        language: object.get("language")
+        language: object
+            .get("language")
             .and_then(|l| l.as_str())
             .map(|s| s.to_string()),
-        sensitive: object.get("sensitive")
-            .and_then(|s| s.as_bool()),
+        sensitive: object.get("sensitive").and_then(|s| s.as_bool()),
         additional_properties: None,
         local: false,
         visibility: VisibilityLevel::Public, // TODO: Determine visibility
@@ -904,46 +975,54 @@ async fn store_note_object(
         announce_count: 0,
     };
 
-    state.db.insert_object(object_doc).await
+    state
+        .db
+        .insert_object(object_doc)
+        .await
         .map_err(|e| format!("Failed to store note object: {}", e))?;
 
     Ok(())
 }
 
 /// Store article object in database
-async fn store_article_object(
-    object: &Value,
-    state: &ActivityPubState,
-) -> Result<(), String> {
+async fn store_article_object(object: &Value, state: &ActivityPubState) -> Result<(), String> {
     let object_doc = ObjectDocument {
         id: None,
-        object_id: object.get("id")
+        object_id: object
+            .get("id")
             .and_then(|id| id.as_str())
             .unwrap_or(&format!("unknown-{}", Uuid::new_v4()))
             .to_string(),
         object_type: ObjectType::Article,
-        attributed_to: object.get("attributedTo")
+        attributed_to: object
+            .get("attributedTo")
             .and_then(|a| a.as_str())
             .unwrap_or("unknown")
             .to_string(),
-        content: object.get("content")
+        content: object
+            .get("content")
             .and_then(|c| c.as_str())
             .map(|s| s.to_string()),
-        summary: object.get("summary")
+        summary: object
+            .get("summary")
             .and_then(|s| s.as_str())
             .map(|s| s.to_string()),
-        name: object.get("name")
+        name: object
+            .get("name")
             .and_then(|n| n.as_str())
             .map(|s| s.to_string()),
         media_type: Some("text/html".to_string()),
-        url: object.get("url")
+        url: object
+            .get("url")
             .and_then(|u| u.as_str())
             .map(|s| s.to_string()),
-        published: object.get("published")
+        published: object
+            .get("published")
             .and_then(|p| p.as_str())
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc)),
-        updated: object.get("updated")
+        updated: object
+            .get("updated")
             .and_then(|u| u.as_str())
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc)),
@@ -952,19 +1031,21 @@ async fn store_article_object(
         bto: extract_string_array(object.get("bto")),
         bcc: extract_string_array(object.get("bcc")),
         audience: extract_string_array(object.get("audience")),
-        in_reply_to: object.get("inReplyTo")
+        in_reply_to: object
+            .get("inReplyTo")
             .and_then(|r| r.as_str())
             .map(|s| s.to_string()),
-        conversation: object.get("conversation")
+        conversation: object
+            .get("conversation")
             .and_then(|c| c.as_str())
             .map(|s| s.to_string()),
-        tag: None, // TODO: Parse tags
+        tag: None,        // TODO: Parse tags
         attachment: None, // TODO: Parse attachments
-        language: object.get("language")
+        language: object
+            .get("language")
             .and_then(|l| l.as_str())
             .map(|s| s.to_string()),
-        sensitive: object.get("sensitive")
-            .and_then(|s| s.as_bool()),
+        sensitive: object.get("sensitive").and_then(|s| s.as_bool()),
         additional_properties: None,
         local: false,
         visibility: VisibilityLevel::Public, // TODO: Determine visibility
@@ -974,7 +1055,10 @@ async fn store_article_object(
         announce_count: 0,
     };
 
-    state.db.insert_object(object_doc).await
+    state
+        .db
+        .insert_object(object_doc)
+        .await
         .map_err(|e| format!("Failed to store article object: {}", e))?;
 
     Ok(())
@@ -986,7 +1070,10 @@ async fn publish_activity_message(
     _state: &ActivityPubState,
 ) -> Result<(), String> {
     // TODO: Implement message queue publishing
-    debug!("Publishing activity to message queue: {}", activity.get("type").unwrap_or(&json!("Unknown")));
+    debug!(
+        "Publishing activity to message queue: {}",
+        activity.get("type").unwrap_or(&json!("Unknown"))
+    );
     Ok(())
 }
 
@@ -1034,7 +1121,11 @@ fn extract_string_array(value: Option<&Value>) -> Option<Vec<String>> {
                 .filter_map(|v| v.as_str())
                 .map(|s| s.to_string())
                 .collect();
-            if strings.is_empty() { None } else { Some(strings) }
+            if strings.is_empty() {
+                None
+            } else {
+                Some(strings)
+            }
         }
         Some(Value::String(s)) => Some(vec![s.clone()]),
         _ => None,

@@ -7,10 +7,10 @@
 //! - Instance actor keys (system operations)
 
 use crate::httpsignature::SignatureAlgorithm;
+use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
-use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -224,7 +224,7 @@ impl UserKeyInfo {
     /// Create a new unverified user key
     pub fn new_unverified(actor_id: String, key_pair: KeyPair) -> Self {
         let key_id = key_pair.public_key.key_id(&actor_id);
-        
+
         Self {
             actor_id,
             key_id,
@@ -268,8 +268,8 @@ impl Default for RotationPolicy {
         Self {
             automatic: false,
             rotation_interval: Some(chrono::Duration::days(365)), // 1 year
-            max_age: Some(chrono::Duration::days(400)), // 13 months max
-            notify_before: Some(chrono::Duration::days(30)), // 30 days notice
+            max_age: Some(chrono::Duration::days(400)),           // 13 months max
+            notify_before: Some(chrono::Duration::days(30)),      // 30 days notice
         }
     }
 }
@@ -375,11 +375,13 @@ impl PkiManager {
         actor_id: &str,
         domain: &str,
     ) -> Result<(), PkiError> {
-        let domain_key = self.domain_keys.get(domain)
-            .ok_or_else(|| PkiError::KeyNotFoundError(format!("Domain key for {} not found", domain)))?;
+        let domain_key = self.domain_keys.get(domain).ok_or_else(|| {
+            PkiError::KeyNotFoundError(format!("Domain key for {} not found", domain))
+        })?;
 
-        let user_key = self.user_keys.get_mut(actor_id)
-            .ok_or_else(|| PkiError::KeyNotFoundError(format!("User key for {} not found", actor_id)))?;
+        let user_key = self.user_keys.get_mut(actor_id).ok_or_else(|| {
+            PkiError::KeyNotFoundError(format!("User key for {} not found", actor_id))
+        })?;
 
         // Create domain signature
         let signature_data = format!("{}:{}", user_key.key_id, user_key.public_key.fingerprint);
@@ -404,7 +406,9 @@ impl PkiManager {
     /// Build trust chain for a key
     pub fn build_trust_chain(&self, key_id: &str) -> Result<TrustChain, PkiError> {
         // Find the key
-        let user_key = self.user_keys.values()
+        let user_key = self
+            .user_keys
+            .values()
             .find(|uk| uk.key_id == key_id)
             .ok_or_else(|| PkiError::KeyNotFoundError(format!("Key {} not found", key_id)))?;
 
@@ -414,7 +418,10 @@ impl PkiManager {
         let user_link = TrustChainLink {
             level: "user".to_string(),
             key_id: user_key.key_id.clone(),
-            signed_by: user_key.domain_signature.as_ref().map(|ds| ds.domain_key_id.clone()),
+            signed_by: user_key
+                .domain_signature
+                .as_ref()
+                .map(|ds| ds.domain_key_id.clone()),
             signed_at: user_key.domain_signature.as_ref().map(|ds| ds.signed_at),
             self_signed: user_key.domain_signature.is_none(),
             created_at: user_key.created_at,
@@ -427,7 +434,10 @@ impl PkiManager {
                 let domain_link = TrustChainLink {
                     level: "domain".to_string(),
                     key_id: domain_key.key_id.clone(),
-                    signed_by: domain_key.master_signature.as_ref().map(|ms| ms.master_key_id.clone()),
+                    signed_by: domain_key
+                        .master_signature
+                        .as_ref()
+                        .map(|ms| ms.master_key_id.clone()),
                     signed_at: domain_key.master_signature.as_ref().map(|ms| ms.signed_at),
                     self_signed: domain_key.master_signature.is_none(),
                     created_at: domain_key.created_at,
@@ -470,14 +480,18 @@ impl PkiManager {
     /// Validate trust chain for a key
     pub fn validate_trust_chain(&self, key_id: &str) -> Result<TrustLevel, PkiError> {
         let trust_chain = self.build_trust_chain(key_id)?;
-        
+
         // Verify each link in the chain
         for (_i, link) in trust_chain.verification_chain.iter().enumerate() {
             if !link.self_signed {
                 if let Some(signer_key_id) = &link.signed_by {
                     // Verify signature exists and is valid
                     // This would involve cryptographic verification in a real implementation
-                    tracing::debug!("Verifying signature from {} for {}", signer_key_id, link.key_id);
+                    tracing::debug!(
+                        "Verifying signature from {} for {}",
+                        signer_key_id,
+                        link.key_id
+                    );
                 }
             }
         }
@@ -499,16 +513,19 @@ mod tests {
     #[test]
     fn test_user_key_import() {
         let mut pki_manager = PkiManager::new();
-        
+
         let key_pair = KeyPair::from_pem(
             KeyAlgorithm::Rsa { key_size: 2048 },
             "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----".to_string(),
             "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----".to_string(),
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let actor_id = "https://example.com/users/alice".to_string();
-        let user_key = pki_manager.import_user_key(actor_id.clone(), key_pair).unwrap();
-        
+        let user_key = pki_manager
+            .import_user_key(actor_id.clone(), key_pair)
+            .unwrap();
+
         assert_eq!(user_key.trust_level, TrustLevel::Unverified);
         assert_eq!(user_key.actor_id, actor_id);
     }
@@ -522,9 +539,21 @@ mod tests {
 
     #[test]
     fn test_cache_ttl() {
-        assert_eq!(TrustLevel::Unverified.cache_ttl(), chrono::Duration::minutes(15));
-        assert_eq!(TrustLevel::DomainVerified.cache_ttl(), chrono::Duration::hours(4));
-        assert_eq!(TrustLevel::MasterSigned.cache_ttl(), chrono::Duration::hours(24));
-        assert_eq!(TrustLevel::InstanceActor.cache_ttl(), chrono::Duration::hours(12));
+        assert_eq!(
+            TrustLevel::Unverified.cache_ttl(),
+            chrono::Duration::minutes(15)
+        );
+        assert_eq!(
+            TrustLevel::DomainVerified.cache_ttl(),
+            chrono::Duration::hours(4)
+        );
+        assert_eq!(
+            TrustLevel::MasterSigned.cache_ttl(),
+            chrono::Duration::hours(24)
+        );
+        assert_eq!(
+            TrustLevel::InstanceActor.cache_ttl(),
+            chrono::Duration::hours(12)
+        );
     }
 }

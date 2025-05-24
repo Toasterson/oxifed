@@ -5,8 +5,7 @@
 
 use futures::StreamExt;
 use lapin::{
-    options::*, types::FieldTable, Channel, Connection, ConnectionProperties,
-    ExchangeKind,
+    Channel, Connection, ConnectionProperties, ExchangeKind, options::*, types::FieldTable,
 };
 use oxifed::messaging::EXCHANGE_ACTIVITYPUB_PUBLISH;
 use oxifed::{Activity, client::ActivityPubClient};
@@ -70,11 +69,12 @@ impl PublisherDaemon {
     /// Create a new publisher daemon
     pub async fn new(config: PublisherConfig) -> Result<Self, PublisherError> {
         info!("Connecting to AMQP server: {}", config.amqp_url);
-        
-        let connection = Connection::connect(&config.amqp_url, ConnectionProperties::default()).await?;
-        
-        let client = oxifed::client::ActivityPubClient::new()
-            .map_err(|e| PublisherError::ClientError(e))?;
+
+        let connection =
+            Connection::connect(&config.amqp_url, ConnectionProperties::default()).await?;
+
+        let client =
+            oxifed::client::ActivityPubClient::new().map_err(|e| PublisherError::ClientError(e))?;
 
         Ok(Self {
             config,
@@ -85,22 +85,25 @@ impl PublisherDaemon {
 
     /// Start the publisher daemon
     pub async fn start(&self) -> Result<(), PublisherError> {
-        info!("Starting ActivityPub Publisher Daemon with {} workers", self.config.worker_count);
+        info!(
+            "Starting ActivityPub Publisher Daemon with {} workers",
+            self.config.worker_count
+        );
 
         // Create channels for workers
         let mut workers = Vec::new();
-        
+
         for worker_id in 0..self.config.worker_count {
             let channel = self.connection.create_channel().await?;
             let client = self.client.clone();
             let config = self.config.clone();
-            
+
             let worker = tokio::spawn(async move {
                 if let Err(e) = Self::run_worker(worker_id, channel, client, config).await {
                     error!("Worker {} failed: {}", worker_id, e);
                 }
             });
-            
+
             workers.push(worker);
         }
 
@@ -187,34 +190,52 @@ impl PublisherDaemon {
             .for_each(move |delivery_result| {
                 let client = client.clone();
                 let config = config.clone();
-                
+
                 async move {
                     match delivery_result {
                         Ok(delivery) => {
                             let delivery_tag = delivery.delivery_tag;
-                            info!("Worker {} processing message with delivery tag: {}", worker_id, delivery_tag);
-                            
+                            info!(
+                                "Worker {} processing message with delivery tag: {}",
+                                worker_id, delivery_tag
+                            );
+
                             match Self::process_activity(&delivery.data, client, config).await {
                                 Ok(_) => {
-                                    info!("Worker {} successfully processed message {}", worker_id, delivery_tag);
+                                    info!(
+                                        "Worker {} successfully processed message {}",
+                                        worker_id, delivery_tag
+                                    );
                                     if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
-                                        error!("Worker {} failed to ack message {}: {}", worker_id, delivery_tag, e);
+                                        error!(
+                                            "Worker {} failed to ack message {}: {}",
+                                            worker_id, delivery_tag, e
+                                        );
                                     }
                                 }
                                 Err(e) => {
-                                    error!("Worker {} failed to process message {}: {}", worker_id, delivery_tag, e);
+                                    error!(
+                                        "Worker {} failed to process message {}: {}",
+                                        worker_id, delivery_tag, e
+                                    );
                                     // For certain errors, we might want to requeue, for others not
                                     let should_requeue = match &e {
                                         PublisherError::JsonError(_) => false, // Don't requeue malformed JSON
-                                        PublisherError::UrlError(_) => false,  // Don't requeue bad URLs
+                                        PublisherError::UrlError(_) => false, // Don't requeue bad URLs
                                         _ => true, // Requeue for network/temporary errors
                                     };
-                                    
-                                    if let Err(e) = delivery.nack(BasicNackOptions {
-                                        requeue: should_requeue,
-                                        ..Default::default()
-                                    }).await {
-                                        error!("Worker {} failed to nack message {}: {}", worker_id, delivery_tag, e);
+
+                                    if let Err(e) = delivery
+                                        .nack(BasicNackOptions {
+                                            requeue: should_requeue,
+                                            ..Default::default()
+                                        })
+                                        .await
+                                    {
+                                        error!(
+                                            "Worker {} failed to nack message {}: {}",
+                                            worker_id, delivery_tag, e
+                                        );
                                     }
                                 }
                             }
@@ -238,12 +259,15 @@ impl PublisherDaemon {
     ) -> Result<(), PublisherError> {
         // Parse the activity from JSON
         let activity: Activity = serde_json::from_slice(data)?;
-        
-        info!("Processing activity: {:?} with ID: {:?}", activity.activity_type, activity.id);
+
+        info!(
+            "Processing activity: {:?} with ID: {:?}",
+            activity.activity_type, activity.id
+        );
 
         // Extract recipients from the activity
         let recipients = Self::extract_recipients(&activity)?;
-        
+
         if recipients.is_empty() {
             warn!("No recipients found for activity");
             return Ok(());
@@ -291,18 +315,18 @@ impl PublisherDaemon {
     ) -> Result<Url, PublisherError> {
         // Fetch the actor to get their inbox
         let actor = client.fetch_actor(actor_url).await?;
-        
+
         let inbox_str = actor
             .additional_properties
             .get("inbox")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| PublisherError::JsonError(
-                serde_json::Error::io(std::io::Error::new(
+            .ok_or_else(|| {
+                PublisherError::JsonError(serde_json::Error::io(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "Actor missing inbox property"
-                ))
-            ))?;
-            
+                    "Actor missing inbox property",
+                )))
+            })?;
+
         Ok(Url::parse(inbox_str)?)
     }
 
@@ -330,7 +354,8 @@ impl PublisherDaemon {
 
         // Filter out special collections like "https://www.w3.org/ns/activitystreams#Public"
         recipients.retain(|url| {
-            !url.as_str().starts_with("https://www.w3.org/ns/activitystreams")
+            !url.as_str()
+                .starts_with("https://www.w3.org/ns/activitystreams")
         });
 
         // Remove duplicates
@@ -398,17 +423,17 @@ impl PublisherDaemon {
                 }
                 Err(e) => {
                     last_error = Some(e);
-                    
+
                     if attempts < config.retry_attempts {
                         let delay = std::time::Duration::from_millis(
-                            config.retry_delay_ms * (2_u64.pow(attempts as u32 - 1))
+                            config.retry_delay_ms * (2_u64.pow(attempts as u32 - 1)),
                         );
-                        
+
                         warn!(
                             "Delivery attempt {} failed for {}, retrying in {:?}",
                             attempts, recipient_url, delay
                         );
-                        
+
                         tokio::time::sleep(delay).await;
                     }
                 }

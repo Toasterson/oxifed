@@ -3,7 +3,9 @@
 //! This module tests the domain message creation and serialization
 //! to ensure they work correctly with the RabbitMQ messaging system.
 
-use oxifed::messaging::{DomainCreateMessage, DomainUpdateMessage, DomainDeleteMessage, Message, MessageEnum};
+use oxifed::messaging::{
+    DomainCreateMessage, DomainDeleteMessage, DomainUpdateMessage, Message, MessageEnum,
+};
 use serde_json;
 
 #[test]
@@ -28,13 +30,16 @@ fn test_domain_create_message_serialization() {
     assert!(json.contains("Example Domain"));
     assert!(json.contains("admin@example.com"));
     assert!(json.contains("approval"));
-    
+
     // Test that it can be deserialized back
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
     if let MessageEnum::DomainCreateMessage(domain_msg) = deserialized {
         assert_eq!(domain_msg.domain, "example.com");
         assert_eq!(domain_msg.name, Some("Example Domain".to_string()));
-        assert_eq!(domain_msg.contact_email, Some("admin@example.com".to_string()));
+        assert_eq!(
+            domain_msg.contact_email,
+            Some("admin@example.com".to_string())
+        );
         assert_eq!(domain_msg.registration_mode, Some("approval".to_string()));
         assert_eq!(domain_msg.authorized_fetch, Some(true));
         assert_eq!(domain_msg.max_note_length, Some(500));
@@ -47,11 +52,11 @@ fn test_domain_create_message_serialization() {
 #[test]
 fn test_domain_rpc_request_serialization() {
     use oxifed::messaging::{DomainRpcRequest, DomainRpcRequestType};
-    
+
     // Test list domains request
     let list_request = DomainRpcRequest::list_domains("req-123".to_string());
     let json = serde_json::to_string(&list_request.to_message()).unwrap();
-    
+
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
     if let MessageEnum::DomainRpcRequest(rpc_req) = deserialized {
         assert_eq!(rpc_req.request_id, "req-123");
@@ -63,11 +68,12 @@ fn test_domain_rpc_request_serialization() {
     } else {
         panic!("Expected DomainRpcRequest");
     }
-    
+
     // Test get domain request
-    let get_request = DomainRpcRequest::get_domain("req-456".to_string(), "example.com".to_string());
+    let get_request =
+        DomainRpcRequest::get_domain("req-456".to_string(), "example.com".to_string());
     let json = serde_json::to_string(&get_request.to_message()).unwrap();
-    
+
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
     if let MessageEnum::DomainRpcRequest(rpc_req) = deserialized {
         assert_eq!(rpc_req.request_id, "req-456");
@@ -83,8 +89,8 @@ fn test_domain_rpc_request_serialization() {
 
 #[test]
 fn test_domain_rpc_response_serialization() {
-    use oxifed::messaging::{DomainRpcResponse, DomainInfo, DomainRpcResult};
-    
+    use oxifed::messaging::{DomainInfo, DomainRpcResponse, DomainRpcResult};
+
     // Create test domain info
     let domain_info = DomainInfo {
         domain: "test.com".to_string(),
@@ -100,11 +106,12 @@ fn test_domain_rpc_response_serialization() {
         created_at: "2024-01-01T00:00:00Z".to_string(),
         updated_at: "2024-01-01T00:00:00Z".to_string(),
     };
-    
+
     // Test domain list response
-    let list_response = DomainRpcResponse::domain_list("req-123".to_string(), vec![domain_info.clone()]);
+    let list_response =
+        DomainRpcResponse::domain_list("req-123".to_string(), vec![domain_info.clone()]);
     let json = serde_json::to_string(&list_response.to_message()).unwrap();
-    
+
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
     if let MessageEnum::DomainRpcResponse(rpc_resp) = deserialized {
         assert_eq!(rpc_resp.request_id, "req-123");
@@ -117,11 +124,12 @@ fn test_domain_rpc_response_serialization() {
     } else {
         panic!("Expected DomainRpcResponse");
     }
-    
+
     // Test domain details response
-    let details_response = DomainRpcResponse::domain_details("req-456".to_string(), Some(domain_info));
+    let details_response =
+        DomainRpcResponse::domain_details("req-456".to_string(), Some(domain_info));
     let json = serde_json::to_string(&details_response.to_message()).unwrap();
-    
+
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
     if let MessageEnum::DomainRpcResponse(rpc_resp) = deserialized {
         assert_eq!(rpc_resp.request_id, "req-456");
@@ -134,11 +142,12 @@ fn test_domain_rpc_response_serialization() {
     } else {
         panic!("Expected DomainRpcResponse");
     }
-    
+
     // Test error response
-    let error_response = DomainRpcResponse::error("req-789".to_string(), "Database error".to_string());
+    let error_response =
+        DomainRpcResponse::error("req-789".to_string(), "Database error".to_string());
     let json = serde_json::to_string(&error_response.to_message()).unwrap();
-    
+
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
     if let MessageEnum::DomainRpcResponse(rpc_resp) = deserialized {
         assert_eq!(rpc_resp.request_id, "req-789");
@@ -172,7 +181,7 @@ fn test_domain_update_message_serialization() {
     assert!(json.contains("example.com"));
     assert!(json.contains("Updated Domain"));
     assert!(json.contains("open"));
-    
+
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
     if let MessageEnum::DomainUpdateMessage(domain_msg) = deserialized {
         assert_eq!(domain_msg.domain, "example.com");
@@ -192,7 +201,7 @@ fn test_domain_delete_message_serialization() {
     let json = serde_json::to_string(&message.to_message()).unwrap();
     assert!(json.contains("example.com"));
     assert!(json.contains("true"));
-    
+
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
     if let MessageEnum::DomainDeleteMessage(domain_msg) = deserialized {
         assert_eq!(domain_msg.domain, "example.com");
@@ -221,7 +230,7 @@ fn test_domain_create_message_minimal() {
 
     let json = serde_json::to_string(&message.to_message()).unwrap();
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
-    
+
     if let MessageEnum::DomainCreateMessage(domain_msg) = deserialized {
         assert_eq!(domain_msg.domain, "minimal.com");
         assert_eq!(domain_msg.name, None);
@@ -237,7 +246,7 @@ fn test_domain_create_message_minimal() {
 #[test]
 fn test_domain_message_with_custom_properties() {
     use serde_json::json;
-    
+
     let custom_props = json!({
         "theme": "dark",
         "features": ["polls", "reactions"],
@@ -263,7 +272,7 @@ fn test_domain_message_with_custom_properties() {
 
     let json = serde_json::to_string(&message.to_message()).unwrap();
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
-    
+
     if let MessageEnum::DomainCreateMessage(domain_msg) = deserialized {
         assert_eq!(domain_msg.domain, "custom.com");
         assert_eq!(domain_msg.properties, Some(custom_props));

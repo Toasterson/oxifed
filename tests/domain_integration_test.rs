@@ -4,9 +4,8 @@
 //! message creation, RPC requests/responses, and error handling.
 
 use oxifed::messaging::{
-    DomainCreateMessage, DomainUpdateMessage, DomainDeleteMessage,
-    DomainRpcRequest, DomainRpcResponse, DomainRpcRequestType, DomainRpcResult,
-    DomainInfo, Message, MessageEnum
+    DomainCreateMessage, DomainDeleteMessage, DomainInfo, DomainRpcRequest, DomainRpcRequestType,
+    DomainRpcResponse, DomainRpcResult, DomainUpdateMessage, Message, MessageEnum,
 };
 use serde_json;
 use uuid::Uuid;
@@ -61,11 +60,11 @@ fn test_complete_domain_lifecycle_messages() {
 #[test]
 fn test_rpc_request_response_workflow() {
     let request_id = Uuid::new_v4().to_string();
-    
+
     // Test list domains RPC workflow
     let list_request = DomainRpcRequest::list_domains(request_id.clone());
     let request_json = serde_json::to_string(&list_request.to_message()).unwrap();
-    
+
     // Verify request serialization
     let deserialized_request: MessageEnum = serde_json::from_str(&request_json).unwrap();
     if let MessageEnum::DomainRpcRequest(req) = deserialized_request {
@@ -91,13 +90,11 @@ fn test_rpc_request_response_workflow() {
         updated_at: "2024-01-01T00:00:00Z".to_string(),
     };
 
-    let list_response = DomainRpcResponse::domain_list(
-        request_id.clone(),
-        vec![domain_info.clone()]
-    );
-    
+    let list_response =
+        DomainRpcResponse::domain_list(request_id.clone(), vec![domain_info.clone()]);
+
     let response_json = serde_json::to_string(&list_response.to_message()).unwrap();
-    
+
     // Verify response serialization
     let deserialized_response: MessageEnum = serde_json::from_str(&response_json).unwrap();
     if let MessageEnum::DomainRpcResponse(resp) = deserialized_response {
@@ -119,11 +116,11 @@ fn test_rpc_request_response_workflow() {
 fn test_get_domain_rpc_workflow() {
     let request_id = Uuid::new_v4().to_string();
     let domain_name = "specific.example".to_string();
-    
+
     // Test get domain RPC request
     let get_request = DomainRpcRequest::get_domain(request_id.clone(), domain_name.clone());
     let request_json = serde_json::to_string(&get_request.to_message()).unwrap();
-    
+
     // Verify request
     let deserialized_request: MessageEnum = serde_json::from_str(&request_json).unwrap();
     if let MessageEnum::DomainRpcRequest(req) = deserialized_request {
@@ -147,20 +144,21 @@ fn test_get_domain_rpc_workflow() {
         authorized_fetch: false,
         max_note_length: Some(1000),
         max_file_size: Some(20971520),
-        allowed_file_types: Some(vec!["image/jpeg".to_string(), "image/png".to_string(), "image/gif".to_string()]),
+        allowed_file_types: Some(vec![
+            "image/jpeg".to_string(),
+            "image/png".to_string(),
+            "image/gif".to_string(),
+        ]),
         status: "Active".to_string(),
         created_at: "2024-01-01T00:00:00Z".to_string(),
         updated_at: "2024-01-02T00:00:00Z".to_string(),
     };
 
-    let success_response = DomainRpcResponse::domain_details(
-        request_id.clone(),
-        Some(domain_info)
-    );
-    
+    let success_response = DomainRpcResponse::domain_details(request_id.clone(), Some(domain_info));
+
     let response_json = serde_json::to_string(&success_response.to_message()).unwrap();
     let deserialized_response: MessageEnum = serde_json::from_str(&response_json).unwrap();
-    
+
     if let MessageEnum::DomainRpcResponse(resp) = deserialized_response {
         assert_eq!(resp.request_id, request_id);
         if let DomainRpcResult::DomainDetails { domain } = resp.result {
@@ -179,7 +177,7 @@ fn test_get_domain_rpc_workflow() {
     let not_found_response = DomainRpcResponse::domain_details(request_id.clone(), None);
     let not_found_json = serde_json::to_string(&not_found_response.to_message()).unwrap();
     let deserialized_not_found: MessageEnum = serde_json::from_str(&not_found_json).unwrap();
-    
+
     if let MessageEnum::DomainRpcResponse(resp) = deserialized_not_found {
         if let DomainRpcResult::DomainDetails { domain } = resp.result {
             assert!(domain.is_none());
@@ -192,16 +190,14 @@ fn test_get_domain_rpc_workflow() {
 #[test]
 fn test_error_handling_scenarios() {
     let request_id = Uuid::new_v4().to_string();
-    
+
     // Test database error response
-    let error_response = DomainRpcResponse::error(
-        request_id.clone(),
-        "Database connection failed".to_string()
-    );
-    
+    let error_response =
+        DomainRpcResponse::error(request_id.clone(), "Database connection failed".to_string());
+
     let error_json = serde_json::to_string(&error_response.to_message()).unwrap();
     let deserialized_error: MessageEnum = serde_json::from_str(&error_json).unwrap();
-    
+
     if let MessageEnum::DomainRpcResponse(resp) = deserialized_error {
         assert_eq!(resp.request_id, request_id);
         if let DomainRpcResult::Error { message } = resp.result {
@@ -212,13 +208,11 @@ fn test_error_handling_scenarios() {
     } else {
         panic!("Expected DomainRpcResponse");
     }
-    
+
     // Test constraint violation error for domain creation
-    let constraint_error = DomainRpcResponse::error(
-        request_id.clone(),
-        "Domain already exists".to_string()
-    );
-    
+    let constraint_error =
+        DomainRpcResponse::error(request_id.clone(), "Domain already exists".to_string());
+
     let constraint_json = serde_json::to_string(&constraint_error.to_message()).unwrap();
     assert!(constraint_json.contains("Domain already exists"));
 }
@@ -250,25 +244,61 @@ fn test_domain_info_comprehensive_fields() {
     // Test serialization and deserialization
     let domain_json = serde_json::to_string(&comprehensive_domain).unwrap();
     let deserialized_domain: DomainInfo = serde_json::from_str(&domain_json).unwrap();
-    
+
     assert_eq!(deserialized_domain.domain, "comprehensive.test");
-    assert_eq!(deserialized_domain.name, Some("Comprehensive Test Domain".to_string()));
+    assert_eq!(
+        deserialized_domain.name,
+        Some("Comprehensive Test Domain".to_string())
+    );
     assert_eq!(deserialized_domain.registration_mode, "Invite");
     assert_eq!(deserialized_domain.authorized_fetch, true);
     assert_eq!(deserialized_domain.max_note_length, Some(2000));
     assert_eq!(deserialized_domain.max_file_size, Some(52428800));
-    assert_eq!(deserialized_domain.allowed_file_types.as_ref().unwrap().len(), 6);
-    assert!(deserialized_domain.allowed_file_types.as_ref().unwrap().contains(&"video/mp4".to_string()));
+    assert_eq!(
+        deserialized_domain
+            .allowed_file_types
+            .as_ref()
+            .unwrap()
+            .len(),
+        6
+    );
+    assert!(
+        deserialized_domain
+            .allowed_file_types
+            .as_ref()
+            .unwrap()
+            .contains(&"video/mp4".to_string())
+    );
 }
 
 #[test]
 fn test_message_enum_completeness() {
     // Verify all domain-related message types are included in MessageEnum
     let create_msg = DomainCreateMessage::new(
-        "test.com".to_string(), None, None, None, None, None, None, None, None, None, None
+        "test.com".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     );
     let update_msg = DomainUpdateMessage::new(
-        "test.com".to_string(), None, None, None, None, None, None, None, None, None, None
+        "test.com".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     );
     let delete_msg = DomainDeleteMessage::new("test.com".to_string(), false);
     let rpc_request = DomainRpcRequest::list_domains("req-123".to_string());
