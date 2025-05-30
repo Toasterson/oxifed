@@ -10,6 +10,7 @@ use serde_json::Value;
 /// Constants for RabbitMQ Exchange names
 pub const EXCHANGE_INTERNAL_PUBLISH: &str = "oxifed.internal.publish";
 pub const EXCHANGE_ACTIVITYPUB_PUBLISH: &str = "oxifed.activitypub.publish";
+pub const EXCHANGE_INCOMING_PROCESS: &str = "oxifed.incoming.process";
 pub const EXCHANGE_RPC_REQUEST: &str = "oxifed.rpc.request";
 pub const EXCHANGE_RPC_RESPONSE: &str = "oxifed.rpc.response";
 
@@ -40,6 +41,8 @@ pub enum MessageEnum {
     DomainDeleteMessage(DomainDeleteMessage),
     DomainRpcRequest(DomainRpcRequest),
     DomainRpcResponse(DomainRpcResponse),
+    IncomingObjectMessage(IncomingObjectMessage),
+    IncomingActivityMessage(IncomingActivityMessage),
 }
 
 /// Message format for profile creation requests
@@ -622,5 +625,61 @@ impl DomainRpcResponse {
 impl Message for DomainRpcResponse {
     fn to_message(&self) -> MessageEnum {
         MessageEnum::DomainRpcResponse(self.clone())
+    }
+}
+
+/// Message format for incoming ActivityPub objects that need processing
+///
+/// This message type is used when forwarding received ActivityPub objects
+/// to the incoming processing pipeline instead of storing them directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncomingObjectMessage {
+    /// The raw object JSON as received
+    pub object: Value,
+    /// Type of the object (Note, Article, etc.)
+    pub object_type: String,
+    /// The actor ID that attributed this object
+    pub attributed_to: String,
+    /// The domain this object was received for
+    pub target_domain: String,
+    /// The username this object was addressed to (if any)
+    pub target_username: Option<String>,
+    /// Timestamp when the object was received
+    pub received_at: String,
+    /// Source IP or identifier for tracking
+    pub source: Option<String>,
+}
+
+impl Message for IncomingObjectMessage {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::IncomingObjectMessage(self.clone())
+    }
+}
+
+/// Message format for incoming ActivityPub activities that need processing
+///
+/// This message type is used when forwarding received ActivityPub activities
+/// to the incoming processing pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncomingActivityMessage {
+    /// The raw activity JSON as received
+    pub activity: Value,
+    /// Type of the activity (Create, Update, Delete, etc.)
+    pub activity_type: String,
+    /// The actor ID that performed this activity
+    pub actor: String,
+    /// The domain this activity was received for
+    pub target_domain: String,
+    /// The username this activity was addressed to (if any)
+    pub target_username: Option<String>,
+    /// Timestamp when the activity was received
+    pub received_at: String,
+    /// Source IP or identifier for tracking
+    pub source: Option<String>,
+}
+
+impl Message for IncomingActivityMessage {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::IncomingActivityMessage(self.clone())
     }
 }

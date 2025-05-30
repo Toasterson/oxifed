@@ -22,7 +22,7 @@ use oxifed::messaging::{
     RejectActivityMessage,
 };
 use oxifed::messaging::{
-    EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INTERNAL_PUBLISH, EXCHANGE_RPC_REQUEST,
+    EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INCOMING_PROCESS, EXCHANGE_INTERNAL_PUBLISH, EXCHANGE_RPC_REQUEST,
     EXCHANGE_RPC_RESPONSE, QUEUE_RPC_DOMAIN,
 };
 use serde::de::Error;
@@ -105,6 +105,19 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
     channel
         .exchange_declare(
             EXCHANGE_ACTIVITYPUB_PUBLISH,
+            ExchangeKind::Fanout,
+            ExchangeDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
+    // Declare the incoming processing exchange for received ActivityPub objects
+    channel
+        .exchange_declare(
+            EXCHANGE_INCOMING_PROCESS,
             ExchangeKind::Fanout,
             ExchangeDeclareOptions {
                 durable: true,
@@ -349,6 +362,16 @@ async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQE
             warn!("RPC messages should not be processed by this handler");
             Ok(())
         }
+        MessageEnum::IncomingObjectMessage(_) => {
+            // Incoming objects should be processed by dedicated incoming processing daemons
+            warn!("IncomingObjectMessage should not be processed by domainservd - it should be handled by dedicated processing daemons");
+            Ok(())
+        }
+        MessageEnum::IncomingActivityMessage(_) => {
+            // Incoming activities should be processed by dedicated incoming processing daemons
+            warn!("IncomingActivityMessage should not be processed by domainservd - it should be handled by dedicated processing daemons");
+            Ok(())
+        }
     }
 }
 
@@ -379,6 +402,10 @@ async fn process_rpc_message(
     // Extract the RPC request from the message envelope
     let request = match message {
         MessageEnum::DomainRpcRequest(req) => req,
+        MessageEnum::IncomingObjectMessage(_) | MessageEnum::IncomingActivityMessage(_) => {
+            warn!("Incoming messages should not be processed by RPC handler");
+            return Ok(());
+        }
         _ => {
             error!("Received non-RPC message in RPC queue");
             return Ok(());
@@ -814,6 +841,108 @@ async fn publish_activity_to_activitypub_exchange(
     info!(
         "Activity published to ActivityPub exchange: {:?}",
         activity.activity_type
+    );
+    Ok(())
+}
+
+/// Publish incoming object to the incoming processing exchange
+pub async fn publish_incoming_object_to_exchange(
+    object: &serde_json::Value,
+    object_type: &str,
+    attributed_to: &str,
+    target_domain: &str,
+    target_username: Option<&str>,
+    source: Option<&str>,
+) -> Result<(), RabbitMQError> {
+    // Get AMQP URL from environment or use default
+    let amqp_url = std::env::var("AMQP_URL")
+        .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672".to_string());
+
+    // Create a standalone connection for publishing
+    let conn =
+        lapin::Connection::connect(&amqp_url, lapin::ConnectionProperties::default()).await?;
+
+    let channel = conn.create_channel().await?;
+
+    // Create the incoming object message
+    let incoming_message = oxifed::messaging::IncomingObjectMessage {
+        object: object.clone(),
+        object_type: object_type.to_string(),
+        attributed_to: attributed_to.to_string(),
+        target_domain: target_domain.to_string(),
+        target_username: target_username.map(|s| s.to_string()),
+        received_at: chrono::Utc::now().to_rfc3339(),
+        source: source.map(|s| s.to_string()),
+    };
+
+    // Convert to JSON for publishing
+    let message_json = serde_json::to_vec(&incoming_message)?;
+
+    // Publish to the incoming processing exchange
+    channel
+        .basic_publish(
+            EXCHANGE_INCOMING_PROCESS,
+            "", // no routing key for fanout exchanges
+            lapin::options::BasicPublishOptions::default(),
+            &message_json,
+            lapin::BasicProperties::default(),
+        )
+        .await?;
+
+    info!(
+        "Incoming {} object from {} published to processing exchange",
+        object_type, attributed_to
+    );
+    Ok(())
+}
+
+/// Publish incoming activity to the incoming processing exchange
+pub async fn publish_incoming_activity_to_exchange(
+    activity: &serde_json::Value,
+    activity_type: &str,
+    actor: &str,
+    target_domain: &str,
+    target_username: Option<&str>,
+    source: Option<&str>,
+) -> Result<(), RabbitMQError> {
+    // Get AMQP URL from environment or use default
+    let amqp_url = std::env::var("AMQP_URL")
+        .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672".to_string());
+
+    // Create a standalone connection for publishing
+    let conn =
+        lapin::Connection::connect(&amqp_url, lapin::ConnectionProperties::default()).await?;
+
+    let channel = conn.create_channel().await?;
+
+    // Create the incoming activity message
+    let incoming_message = oxifed::messaging::IncomingActivityMessage {
+        activity: activity.clone(),
+        activity_type: activity_type.to_string(),
+        actor: actor.to_string(),
+        target_domain: target_domain.to_string(),
+        target_username: target_username.map(|s| s.to_string()),
+        received_at: chrono::Utc::now().to_rfc3339(),
+        source: source.map(|s| s.to_string()),
+    };
+
+    // Convert to JSON for publishing
+    let message_json = serde_json::to_vec(&incoming_message)?;
+
+    // Publish to the incoming processing exchange
+    channel
+        .basic_publish(
+            EXCHANGE_INCOMING_PROCESS,
+            "", // no routing key for fanout exchanges
+            lapin::options::BasicPublishOptions::default(),
+            &message_json,
+            lapin::BasicProperties::default(),
+        )
+        .await?;
+
+    info!(
+        "Incoming {} activity from {} published to processing exchange",
+        activity_type, actor
     );
     Ok(())
 }

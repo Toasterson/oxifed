@@ -326,7 +326,7 @@ async fn post_inbox(
     }
 
     // Process the activity with the parsed struct
-    match process_incoming_activity(&activity, &actor_doc, &state).await {
+    match process_incoming_activity(&activity, &actor_doc, &state, &domain, &username).await {
         Ok(_) => {
             info!(
                 "Successfully processed {} activity for user: {}",
@@ -410,7 +410,7 @@ async fn post_shared_inbox(
     };
 
     // Process the activity with the parsed struct
-    match process_shared_inbox_activity(&activity, &state).await {
+    match process_shared_inbox_activity(&activity, &state, &domain).await {
         Ok(_) => {
             info!(
                 "Successfully processed {} activity in shared inbox",
@@ -884,6 +884,8 @@ async fn process_incoming_activity(
     activity: &Activity,
     actor: &ActorDocument,
     state: &AppState,
+    domain: &str,
+    username: &str,
 ) -> Result<(), String> {
     info!(
         "Processing {:?} activity for {}",
@@ -893,7 +895,7 @@ async fn process_incoming_activity(
     match activity.activity_type {
         ActivityType::Follow => handle_follow_activity(activity, actor, state).await,
         ActivityType::Undo => handle_undo_activity(activity, actor, state).await,
-        ActivityType::Create => handle_create_activity(activity, actor, state).await,
+        ActivityType::Create => handle_create_activity(activity, actor, state, domain, Some(username)).await,
         ActivityType::Update => handle_update_activity(activity, actor, state).await,
         ActivityType::Delete => handle_delete_activity(activity, actor, state).await,
         ActivityType::Like => handle_like_activity(activity, actor, state).await,
@@ -909,6 +911,7 @@ async fn process_incoming_activity(
 async fn process_shared_inbox_activity(
     activity: &Activity,
     state: &AppState,
+    domain: &str,
 ) -> Result<(), String> {
     info!(
         "Processing {:?} activity in shared inbox",
@@ -919,8 +922,26 @@ async fn process_shared_inbox_activity(
     // TODO: Implement proper routing based on activity addressing
     debug!("Processing activity ID: {:?}", activity.id);
 
-    // Store the activity using the typed version
-    store_activity_struct(activity, state).await
+    // Send the activity to the incoming processing exchange instead of storing directly
+    let activity_json = serde_json::to_value(activity)
+        .map_err(|e| format!("Failed to serialize activity: {}", e))?;
+    
+    let actor_id = activity.actor.as_ref()
+        .and_then(|actor| match actor {
+            oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
+            _ => None,
+        })
+        .unwrap_or("unknown");
+    
+    crate::rabbitmq::publish_incoming_activity_to_exchange(
+        &activity_json,
+        &format!("{:?}", activity.activity_type),
+        actor_id,
+        domain,
+        None,
+        None,
+    ).await
+    .map_err(|e| format!("Failed to publish activity to incoming exchange: {}", e))
 }
 
 /// Handle Follow activity
@@ -1058,6 +1079,8 @@ async fn handle_create_activity(
     activity: &Activity,
     actor: &ActorDocument,
     state: &AppState,
+    domain: &str,
+    username: Option<&str>,
 ) -> Result<(), String> {
     let object = activity.object.as_ref().ok_or("Missing create object")?;
 
@@ -1067,17 +1090,24 @@ async fn handle_create_activity(
             if let Some(type_val) = obj.additional_properties.get("type") {
                 if let Some(object_type) = type_val.as_str() {
                     match object_type {
-                        "Note" => {
-                            info!("Processing note creation from {}", actor.actor_id);
+                        "Note" | "Article" => {
+                            info!("Sending {} creation from {} to incoming processing exchange", object_type, actor.actor_id);
                             let object_json = serde_json::to_value(obj)
                                 .map_err(|e| format!("Failed to serialize object: {}", e))?;
-                            store_note_object(&object_json, state).await?;
-                        }
-                        "Article" => {
-                            info!("Processing article creation from {}", actor.actor_id);
-                            let object_json = serde_json::to_value(obj)
-                                .map_err(|e| format!("Failed to serialize object: {}", e))?;
-                            store_article_object(&object_json, state).await?;
+                            
+                            let attributed_to = object_json.get("attributedTo")
+                                .and_then(|a| a.as_str())
+                                .unwrap_or(&actor.actor_id);
+                            
+                            crate::rabbitmq::publish_incoming_object_to_exchange(
+                                &object_json,
+                                object_type,
+                                attributed_to,
+                                domain,
+                                username,
+                                None,
+                            ).await
+                            .map_err(|e| format!("Failed to publish object to incoming exchange: {}", e))?;
                         }
                         _ => {
                             warn!("Unhandled create object type: {}", object_type);
@@ -1095,10 +1125,26 @@ async fn handle_create_activity(
         }
     }
 
-    // Store the activity
+    // Send the activity to the incoming processing exchange instead of storing directly
     let activity_json = serde_json::to_value(activity)
         .map_err(|e| format!("Failed to serialize activity: {}", e))?;
-    store_activity(&activity_json, state).await
+    
+    let actor_id = activity.actor.as_ref()
+        .and_then(|actor| match actor {
+            oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
+            _ => None,
+        })
+        .unwrap_or(&actor.actor_id);
+    
+    crate::rabbitmq::publish_incoming_activity_to_exchange(
+        &activity_json,
+        &format!("{:?}", activity.activity_type),
+        actor_id,
+        domain,
+        username,
+        None,
+    ).await
+    .map_err(|e| format!("Failed to publish activity to incoming exchange: {}", e))
 }
 
 /// Handle Update activity
