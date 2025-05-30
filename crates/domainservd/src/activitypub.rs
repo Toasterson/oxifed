@@ -12,27 +12,70 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use oxifed::{
-    ActivityType, ObjectType,
+    Activity, ActivityType, ObjectType,
     database::{
-        ActivityDocument, ActivityStatus, ActorDocument, ActorStatus, DatabaseManager,
-        FollowDocument, FollowStatus, ObjectDocument, VisibilityLevel,
+        ActivityDocument, ActivityStatus, ActorDocument, ActorStatus, FollowDocument, FollowStatus,
+        ObjectDocument, VisibilityLevel,
     },
-    pki::PkiManager,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::sync::Arc;
 use tracing::{debug, error, info, warn};
+use url::Url;
 use uuid::Uuid;
 
-/// Application state for ActivityPub handlers
-#[derive(Clone)]
-pub struct ActivityPubState {
-    pub db: Arc<DatabaseManager>,
-    pub pki: Arc<PkiManager>,
-    pub mq_pool: deadpool_lapin::Pool,
-    pub domain: String,
+use crate::{AppState, extract_domain_from_headers};
+
+/// Extract domain from ActivityPub activity content as fallback
+///
+/// This function attempts to extract a domain from the activity JSON when the Host header
+/// is missing or invalid. It tries the following sources in order:
+/// 1. The `actor` field URL
+/// 2. The `object` field URL (if it's a string)
+/// 3. The `object.id` field URL (if object is an embedded object)
+///
+/// # Arguments
+/// * `activity` - The ActivityPub activity as JSON Value
+///
+/// # Returns
+/// * `Some(String)` - The extracted domain if found
+/// * `None` - If no valid domain could be extracted
+fn extract_domain_from_activity(activity: &Value) -> Option<String> {
+    // Try to extract domain from actor field first
+    if let Some(actor) = activity.get("actor").and_then(|v| v.as_str()) {
+        if let Ok(url) = Url::parse(actor) {
+            if let Some(host) = url.host_str() {
+                return Some(host.to_string());
+            }
+        }
+    }
+
+    // Fallback to object field if actor doesn't have a valid URL
+    if let Some(object) = activity.get("object").and_then(|v| v.as_str()) {
+        if let Ok(url) = Url::parse(object) {
+            if let Some(host) = url.host_str() {
+                return Some(host.to_string());
+            }
+        }
+    }
+
+    // Try object.id if object is an embedded object
+    if let Some(object_id) = activity
+        .get("object")
+        .and_then(|obj| obj.get("id"))
+        .and_then(|id| id.as_str())
+    {
+        if let Ok(url) = Url::parse(object_id) {
+            if let Some(host) = url.host_str() {
+                return Some(host.to_string());
+            }
+        }
+    }
+
+    None
 }
+
+// ActivityPubState is no longer needed - using AppState instead
 
 /// Query parameters for collections
 #[derive(Debug, Deserialize)]
@@ -70,7 +113,7 @@ pub struct ActivityPubCollection {
 }
 
 /// Create ActivityPub router
-pub fn activitypub_router(state: ActivityPubState) -> Router<ActivityPubState> {
+pub fn activitypub_router(_state: AppState) -> Router<AppState> {
     Router::new()
         // Actor endpoints
         .route("/users/:username", get(get_actor))
@@ -87,26 +130,34 @@ pub fn activitypub_router(state: ActivityPubState) -> Router<ActivityPubState> {
         .route("/inbox", post(post_shared_inbox))
         // Node info
         .route("/nodeinfo/2.0", get(get_nodeinfo))
-        .with_state(state)
 }
 
 /// Get actor profile
 async fn get_actor(
     Path(username): Path<String>,
-    State(state): State<ActivityPubState>,
-    _headers: HeaderMap,
+    State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting actor profile for username: {}", username);
 
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     // Find actor in database
     let actor_doc = match state
-        .db
-        .find_actor_by_username(&username, &state.domain)
+        .db_manager
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
         Ok(None) => {
-            warn!("Actor not found: {}@{}", username, state.domain);
+            warn!("Actor not found: {}@{}", username, domain);
             return Err(StatusCode::NOT_FOUND);
         }
         Err(e) => {
@@ -117,7 +168,7 @@ async fn get_actor(
 
     // Check if actor is active
     if actor_doc.status != ActorStatus::Active {
-        warn!("Actor not active: {}@{}", username, state.domain);
+        warn!("Actor not active: {}@{}", username, domain);
         return Err(StatusCode::GONE);
     }
 
@@ -176,16 +227,26 @@ async fn get_actor(
 }
 
 /// Handle incoming activities to user inbox
+///
+/// This endpoint receives ActivityPub activities directed at a specific user.
+/// It implements domain fallback: if the Host header is missing or invalid,
+/// it attempts to extract the domain from the activity content itself.
+///
+/// Domain extraction precedence:
+/// 1. HTTP Host header (preferred)
+/// 2. Activity actor URL domain (fallback)
+/// 3. Activity object URL domain (fallback)
+/// 4. Activity object.id URL domain (fallback)
 async fn post_inbox(
     Path(username): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
     headers: HeaderMap,
-    Json(activity): Json<Value>,
+    Json(activity_json): Json<Value>,
 ) -> Result<Response, StatusCode> {
-    info!("Received activity for user inbox: {}", username);
+    info!("Received activity for user: {}", username);
     debug!(
         "Activity payload: {}",
-        serde_json::to_string_pretty(&activity).unwrap_or_default()
+        serde_json::to_string_pretty(&activity_json).unwrap_or_default()
     );
 
     // Verify HTTP signature
@@ -194,10 +255,65 @@ async fn post_inbox(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
+    // Extract domain from Host header with fallback to activity content
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => {
+            debug!("Using domain from Host header: {}", d);
+            d
+        }
+        None => {
+            // Fallback: extract domain from activity content
+            match extract_domain_from_activity(&activity_json) {
+                Some(d) => {
+                    info!(
+                        "Host header missing, using domain from activity content: {}",
+                        d
+                    );
+                    d
+                }
+                None => {
+                    error!("Cannot determine domain from Host header or activity content");
+                    return Err(StatusCode::BAD_REQUEST);
+                }
+            }
+        }
+    };
+
+    // Validate that this domain is served by our instance
+    match state.db_manager.find_domain_by_name(&domain).await {
+        Ok(Some(_)) => {
+            debug!("Confirmed domain {} is served by this instance", domain);
+        }
+        Ok(None) => {
+            warn!("Received activity for unknown domain: {}", domain);
+            return Err(StatusCode::NOT_FOUND);
+        }
+        Err(e) => {
+            error!("Database error validating domain {}: {}", domain, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // Deserialize and validate the activity
+    let activity: Activity = match serde_json::from_value::<Activity>(activity_json.clone()) {
+        Ok(act) => {
+            debug!(
+                "Successfully deserialized activity of type: {:?}",
+                act.activity_type
+            );
+            act
+        }
+        Err(e) => {
+            error!("Failed to deserialize activity: {}", e);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     // Verify actor exists and is active
+    // Find actor in database
     let actor_doc = match state
-        .db
-        .find_actor_by_username(&username, &state.domain)
+        .db_manager
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
@@ -209,9 +325,16 @@ async fn post_inbox(
         return Err(StatusCode::GONE);
     }
 
-    // Process the activity
+    // Process the activity with the parsed struct
     match process_incoming_activity(&activity, &actor_doc, &state).await {
-        Ok(_) => Ok(StatusCode::ACCEPTED.into_response()),
+        Ok(_) => {
+            info!(
+                "Successfully processed {} activity for user: {}",
+                format!("{:?}", activity.activity_type),
+                username
+            );
+            Ok(StatusCode::ACCEPTED.into_response())
+        }
         Err(e) => {
             error!("Failed to process incoming activity: {}", e);
             Err(StatusCode::BAD_REQUEST)
@@ -220,15 +343,25 @@ async fn post_inbox(
 }
 
 /// Handle shared inbox for server-level activities
+///
+/// This endpoint receives ActivityPub activities that are server-wide or
+/// addressed to multiple users. It implements the same domain fallback
+/// mechanism as the user inbox, and additionally validates that the
+/// extracted domain is actually served by this instance.
+///
+/// Domain extraction and validation:
+/// 1. Extract domain from Host header or activity content
+/// 2. Validate domain exists in our database
+/// 3. Process activity if domain is valid
 async fn post_shared_inbox(
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
     headers: HeaderMap,
-    Json(activity): Json<Value>,
+    Json(activity_json): Json<Value>,
 ) -> Result<Response, StatusCode> {
     info!("Received activity for shared inbox");
     debug!(
         "Activity payload: {}",
-        serde_json::to_string_pretty(&activity).unwrap_or_default()
+        serde_json::to_string_pretty(&activity_json).unwrap_or_default()
     );
 
     // Verify HTTP signature
@@ -237,9 +370,54 @@ async fn post_shared_inbox(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Process the activity
+    // Extract domain from Host header with fallback to activity content
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => {
+            debug!("Using domain from Host header: {}", d);
+            d
+        }
+        None => {
+            // Fallback: extract domain from activity content
+            match extract_domain_from_activity(&activity_json) {
+                Some(d) => {
+                    info!(
+                        "Host header missing, using domain from activity content: {}",
+                        d
+                    );
+                    d
+                }
+                None => {
+                    error!("Cannot determine domain from Host header or activity content");
+                    return Err(StatusCode::BAD_REQUEST);
+                }
+            }
+        }
+    };
+
+    // Deserialize and validate the activity
+    let activity: Activity = match serde_json::from_value::<Activity>(activity_json.clone()) {
+        Ok(act) => {
+            debug!(
+                "Successfully deserialized shared inbox activity of type: {:?}",
+                act.activity_type
+            );
+            act
+        }
+        Err(e) => {
+            error!("Failed to deserialize shared inbox activity: {}", e);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    // Process the activity with the parsed struct
     match process_shared_inbox_activity(&activity, &state).await {
-        Ok(_) => Ok(StatusCode::ACCEPTED.into_response()),
+        Ok(_) => {
+            info!(
+                "Successfully processed {} activity in shared inbox",
+                format!("{:?}", activity.activity_type)
+            );
+            Ok(StatusCode::ACCEPTED.into_response())
+        }
         Err(e) => {
             error!("Failed to process shared inbox activity: {}", e);
             Err(StatusCode::BAD_REQUEST)
@@ -251,15 +429,24 @@ async fn post_shared_inbox(
 async fn get_outbox(
     Path(username): Path<String>,
     Query(params): Query<CollectionQuery>,
-    State(state): State<ActivityPubState>,
-    _headers: HeaderMap,
+    State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting outbox for user: {}", username);
 
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     // Find actor
     let actor_doc = match state
-        .db
-        .find_actor_by_username(&username, &state.domain)
+        .db_manager
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
@@ -334,12 +521,11 @@ async fn get_outbox(
 
 /// Post to actor's outbox (C2S)
 async fn post_outbox(
-    Path(_username): Path<String>,
-    State(_state): State<ActivityPubState>,
-    _headers: HeaderMap,
+    Path(username): Path<String>,
+    State(_state): State<AppState>,
     Json(_activity): Json<Value>,
 ) -> Result<Response, StatusCode> {
-    info!("Posting to outbox for user: {}", _username);
+    info!("Posting to outbox for user: {}", username);
 
     // TODO: Implement authentication for C2S
     // For now, reject all C2S posts
@@ -349,14 +535,23 @@ async fn post_outbox(
 /// Get actor's followers
 async fn get_followers(
     Path(username): Path<String>,
-    State(state): State<ActivityPubState>,
-    _headers: HeaderMap,
+    State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting followers for user: {}", username);
 
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     let actor_doc = match state
-        .db
-        .find_actor_by_username(&username, &state.domain)
+        .db_manager
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
@@ -368,7 +563,11 @@ async fn get_followers(
         return Err(StatusCode::GONE);
     }
 
-    let followers = match state.db.get_actor_followers(&actor_doc.actor_id).await {
+    let followers = match state
+        .db_manager
+        .get_actor_followers(&actor_doc.actor_id)
+        .await
+    {
         Ok(followers) => followers,
         Err(e) => {
             error!("Failed to get followers: {}", e);
@@ -401,14 +600,23 @@ async fn get_followers(
 /// Get actor's following
 async fn get_following(
     Path(username): Path<String>,
-    State(state): State<ActivityPubState>,
-    _headers: HeaderMap,
+    State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting following for user: {}", username);
 
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     let actor_doc = match state
-        .db
-        .find_actor_by_username(&username, &state.domain)
+        .db_manager
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
@@ -420,7 +628,11 @@ async fn get_following(
         return Err(StatusCode::GONE);
     }
 
-    let following = match state.db.get_actor_following(&actor_doc.actor_id).await {
+    let following = match state
+        .db_manager
+        .get_actor_following(&actor_doc.actor_id)
+        .await
+    {
         Ok(following) => following,
         Err(e) => {
             error!("Failed to get following: {}", e);
@@ -453,7 +665,7 @@ async fn get_following(
 /// Get actor's liked collection
 async fn get_liked(
     Path(_username): Path<String>,
-    State(_state): State<ActivityPubState>,
+    State(_state): State<AppState>,
 ) -> Result<Response, StatusCode> {
     // Liked collections are typically private
     Err(StatusCode::FORBIDDEN)
@@ -462,13 +674,23 @@ async fn get_liked(
 /// Get actor's featured collection
 async fn get_featured(
     Path(username): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting featured posts for user: {}", username);
 
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     let actor_doc = match state
-        .db
-        .find_actor_by_username(&username, &state.domain)
+        .db_manager
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
@@ -508,13 +730,23 @@ async fn get_featured(
 /// Get individual object
 async fn get_object(
     Path(id): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting object: {}", id);
 
-    let object_id = format!("https://{}/objects/{}", state.domain, id);
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
 
-    let object_doc = match state.db.find_object_by_id(&object_id).await {
+    let object_id = format!("https://{}/objects/{}", domain, id);
+
+    let object_doc = match state.db_manager.find_object_by_id(&object_id).await {
         Ok(Some(obj)) => obj,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
         Err(e) => {
@@ -551,13 +783,23 @@ async fn get_object(
 /// Get individual activity
 async fn get_activity(
     Path(id): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting activity: {}", id);
 
-    let activity_id = format!("https://{}/activities/{}", state.domain, id);
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
 
-    let activity_doc = match state.db.find_activity_by_id(&activity_id).await {
+    let activity_id = format!("https://{}/activities/{}", domain, id);
+
+    let activity_doc = match state.db_manager.find_activity_by_id(&activity_id).await {
         Ok(Some(activity)) => activity,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
         Err(e) => {
@@ -587,7 +829,19 @@ async fn get_activity(
 }
 
 /// Get node info
-async fn get_nodeinfo(State(state): State<ActivityPubState>) -> Result<Response, StatusCode> {
+async fn get_nodeinfo(
+    State(_state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     let nodeinfo = json!({
         "version": "2.0",
         "software": {
@@ -605,7 +859,7 @@ async fn get_nodeinfo(State(state): State<ActivityPubState>) -> Result<Response,
         },
         "openRegistrations": false,
         "metadata": {
-            "nodeName": state.domain,
+            "nodeName": domain,
             "nodeDescription": "Oxifed ActivityPub server"
         }
     });
@@ -619,10 +873,7 @@ async fn get_nodeinfo(State(state): State<ActivityPubState>) -> Result<Response,
 }
 
 /// Verify HTTP signature
-async fn verify_http_signature(
-    _headers: &HeaderMap,
-    _state: &ActivityPubState,
-) -> Result<(), String> {
+async fn verify_http_signature(_headers: &HeaderMap, _state: &AppState) -> Result<(), String> {
     // TODO: Implement proper HTTP signature verification using PKI
     debug!("HTTP signature verification - placeholder implementation");
     Ok(())
@@ -630,30 +881,25 @@ async fn verify_http_signature(
 
 /// Process incoming activity for a specific user
 async fn process_incoming_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
-    let activity_type = activity
-        .get("type")
-        .and_then(|t| t.as_str())
-        .ok_or("Missing activity type")?;
-
     info!(
-        "Processing {} activity for {}",
-        activity_type, actor.actor_id
+        "Processing {:?} activity for {}",
+        activity.activity_type, actor.actor_id
     );
 
-    match activity_type {
-        "Follow" => handle_follow_activity(activity, actor, state).await,
-        "Undo" => handle_undo_activity(activity, actor, state).await,
-        "Create" => handle_create_activity(activity, actor, state).await,
-        "Update" => handle_update_activity(activity, actor, state).await,
-        "Delete" => handle_delete_activity(activity, actor, state).await,
-        "Like" => handle_like_activity(activity, actor, state).await,
-        "Announce" => handle_announce_activity(activity, actor, state).await,
+    match activity.activity_type {
+        ActivityType::Follow => handle_follow_activity(activity, actor, state).await,
+        ActivityType::Undo => handle_undo_activity(activity, actor, state).await,
+        ActivityType::Create => handle_create_activity(activity, actor, state).await,
+        ActivityType::Update => handle_update_activity(activity, actor, state).await,
+        ActivityType::Delete => handle_delete_activity(activity, actor, state).await,
+        ActivityType::Like => handle_like_activity(activity, actor, state).await,
+        ActivityType::Announce => handle_announce_activity(activity, actor, state).await,
         _ => {
-            warn!("Unhandled activity type: {}", activity_type);
+            warn!("Unhandled activity type: {:?}", activity.activity_type);
             Ok(())
         }
     }
@@ -661,36 +907,36 @@ async fn process_incoming_activity(
 
 /// Process shared inbox activity
 async fn process_shared_inbox_activity(
-    activity: &Value,
-    state: &ActivityPubState,
+    activity: &Activity,
+    state: &AppState,
 ) -> Result<(), String> {
-    let activity_type = activity
-        .get("type")
-        .and_then(|t| t.as_str())
-        .ok_or("Missing activity type")?;
-
-    info!("Processing {} activity in shared inbox", activity_type);
+    info!(
+        "Processing {:?} activity in shared inbox",
+        activity.activity_type
+    );
 
     // Determine target actors and route accordingly
-    if let Some(to) = activity.get("to") {
-        // Route to specific actors if needed
-        debug!("Activity addressed to: {:?}", to);
-    }
+    // TODO: Implement proper routing based on activity addressing
+    debug!("Processing activity ID: {:?}", activity.id);
 
-    // For now, just store the activity
-    store_activity(activity, state).await
+    // Store the activity using the typed version
+    store_activity_struct(activity, state).await
 }
 
 /// Handle Follow activity
 async fn handle_follow_activity(
-    activity: &Value,
+    activity: &Activity,
     target_actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     let follower = activity
-        .get("actor")
-        .and_then(|a| a.as_str())
-        .ok_or("Missing follower actor")?;
+        .actor
+        .as_ref()
+        .and_then(|actor| match actor {
+            oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
+            _ => None, // TODO: Handle embedded actor objects
+        })
+        .ok_or("Missing or invalid actor in follow activity")?;
 
     info!(
         "Processing follow from {} to {}",
@@ -704,8 +950,9 @@ async fn handle_follow_activity(
         following: target_actor.actor_id.clone(),
         status: FollowStatus::Pending,
         activity_id: activity
-            .get("id")
-            .and_then(|id| id.as_str())
+            .id
+            .as_ref()
+            .map(|url| url.as_str())
             .unwrap_or("unknown")
             .to_string(),
         accept_activity_id: None,
@@ -714,18 +961,22 @@ async fn handle_follow_activity(
     };
 
     state
-        .db
+        .db_manager
         .insert_follow(follow_doc)
         .await
         .map_err(|e| format!("Failed to store follow: {}", e))?;
 
     // Auto-accept for now (TODO: Check actor preferences)
+    // Create Accept activity (convert Activity back to JSON for response)
+    let activity_json = serde_json::to_value(activity)
+        .map_err(|e| format!("Failed to serialize activity: {}", e))?;
+
     let accept_activity = json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Accept",
         "id": format!("{}/activities/{}", target_actor.actor_id, Uuid::new_v4()),
         "actor": target_actor.actor_id,
-        "object": activity,
+        "object": activity_json,
         "published": Utc::now().to_rfc3339()
     });
 
@@ -734,7 +985,7 @@ async fn handle_follow_activity(
 
     // Update follow status
     state
-        .db
+        .db_manager
         .update_follow_status(follower, &target_actor.actor_id, FollowStatus::Accepted)
         .await
         .map_err(|e| format!("Failed to update follow status: {}", e))?;
@@ -744,109 +995,216 @@ async fn handle_follow_activity(
 
 /// Handle Undo activity
 async fn handle_undo_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
-    let object = activity.get("object").ok_or("Missing undo object")?;
+    let object = activity.object.as_ref().ok_or("Missing undo object")?;
 
-    if let Some(object_type) = object.get("type").and_then(|t| t.as_str()) {
-        match object_type {
-            "Follow" => {
-                let following = object
-                    .get("object")
-                    .and_then(|o| o.as_str())
-                    .ok_or("Missing follow target")?;
+    match object {
+        oxifed::ObjectOrLink::Object(obj) => {
+            // Handle embedded objects - check additional_properties for type
+            if let Some(type_val) = obj.additional_properties.get("type") {
+                if let Some(object_type) = type_val.as_str() {
+                    match object_type {
+                        "Follow" => {
+                            // Extract target from embedded follow object
+                            if let Some(target) = obj.additional_properties.get("object") {
+                                if let Some(following) = target.as_str() {
+                                    info!(
+                                        "Processing undo follow: {} unfollowing {}",
+                                        actor.actor_id, following
+                                    );
 
-                info!(
-                    "Processing unfollow from {} to {}",
-                    actor.actor_id, following
-                );
-
-                state
-                    .db
-                    .update_follow_status(&actor.actor_id, following, FollowStatus::Cancelled)
-                    .await
-                    .map_err(|e| format!("Failed to update follow status: {}", e))?;
+                                    state
+                                        .db_manager
+                                        .update_follow_status(
+                                            &actor.actor_id,
+                                            following,
+                                            FollowStatus::Cancelled,
+                                        )
+                                        .await
+                                        .map_err(|e| {
+                                            format!("Failed to update follow status: {}", e)
+                                        })?;
+                                }
+                            }
+                        }
+                        _ => {
+                            warn!("Unhandled undo object type: {}", object_type);
+                        }
+                    }
+                }
             }
-            _ => {
-                warn!("Unhandled undo object type: {}", object_type);
-            }
+        }
+        oxifed::ObjectOrLink::Url(url) => {
+            // Handle URL reference - would need to fetch the object
+            warn!("Undo with URL reference not yet implemented: {}", url);
+        }
+        _ => {
+            warn!("Unhandled undo object format");
         }
     }
 
+    // Store the activity for record keeping
+    let activity_json = serde_json::to_value(activity)
+        .map_err(|e| format!("Failed to serialize activity: {}", e))?;
+    store_activity(&activity_json, state).await?;
     Ok(())
 }
 
 /// Handle Create activity
 async fn handle_create_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
-    let object = activity.get("object").ok_or("Missing create object")?;
+    let object = activity.object.as_ref().ok_or("Missing create object")?;
 
-    if let Some(object_type) = object.get("type").and_then(|t| t.as_str()) {
-        match object_type {
-            "Note" => {
-                info!("Processing note creation from {}", actor.actor_id);
-                store_note_object(object, state).await?;
+    match object {
+        oxifed::ObjectOrLink::Object(obj) => {
+            // Determine object type from the Object struct
+            if let Some(type_val) = obj.additional_properties.get("type") {
+                if let Some(object_type) = type_val.as_str() {
+                    match object_type {
+                        "Note" => {
+                            info!("Processing note creation from {}", actor.actor_id);
+                            let object_json = serde_json::to_value(obj)
+                                .map_err(|e| format!("Failed to serialize object: {}", e))?;
+                            store_note_object(&object_json, state).await?;
+                        }
+                        "Article" => {
+                            info!("Processing article creation from {}", actor.actor_id);
+                            let object_json = serde_json::to_value(obj)
+                                .map_err(|e| format!("Failed to serialize object: {}", e))?;
+                            store_article_object(&object_json, state).await?;
+                        }
+                        _ => {
+                            warn!("Unhandled create object type: {}", object_type);
+                        }
+                    }
+                }
             }
-            "Article" => {
-                info!("Processing article creation from {}", actor.actor_id);
-                store_article_object(object, state).await?;
-            }
-            _ => {
-                warn!("Unhandled create object type: {}", object_type);
-            }
+        }
+        oxifed::ObjectOrLink::Url(url) => {
+            info!("Create activity with URL reference: {}", url);
+            // Would need to fetch the object to determine type
+        }
+        _ => {
+            warn!("Unhandled create object format");
         }
     }
 
-    store_activity(activity, state).await
+    // Store the activity
+    let activity_json = serde_json::to_value(activity)
+        .map_err(|e| format!("Failed to serialize activity: {}", e))?;
+    store_activity(&activity_json, state).await
 }
 
 /// Handle Update activity
 async fn handle_update_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     info!("Processing update activity from {}", actor.actor_id);
-    store_activity(activity, state).await
+    store_activity_struct(activity, state).await
 }
 
 /// Handle Delete activity
 async fn handle_delete_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     info!("Processing delete activity from {}", actor.actor_id);
-    store_activity(activity, state).await
+    store_activity_struct(activity, state).await
 }
 
 /// Handle Like activity
 async fn handle_like_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     info!("Processing like activity from {}", actor.actor_id);
-    store_activity(activity, state).await
+    store_activity_struct(activity, state).await
 }
 
 /// Handle Announce activity
 async fn handle_announce_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     info!("Processing announce activity from {}", actor.actor_id);
-    store_activity(activity, state).await
+    store_activity_struct(activity, state).await
 }
 
-/// Store activity in database
-async fn store_activity(activity: &Value, state: &ActivityPubState) -> Result<(), String> {
+/// Store activity in database (from typed Activity struct)
+async fn store_activity_struct(activity: &Activity, state: &AppState) -> Result<(), String> {
+    let activity_doc = ActivityDocument {
+        id: None,
+        activity_id: activity
+            .id
+            .as_ref()
+            .map(|url| url.as_str())
+            .unwrap_or(&format!("unknown-{}", Uuid::new_v4()))
+            .to_string(),
+        activity_type: activity.activity_type.clone(),
+        actor: activity
+            .actor
+            .as_ref()
+            .and_then(|actor| match actor {
+                oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
+                _ => None,
+            })
+            .unwrap_or("unknown")
+            .to_string(),
+        object: activity
+            .object
+            .as_ref()
+            .and_then(|obj| match obj {
+                oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
+                _ => None,
+            })
+            .map(|s| s.to_string()),
+        target: activity
+            .target
+            .as_ref()
+            .and_then(|target| match target {
+                oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
+                _ => None,
+            })
+            .map(|s| s.to_string()),
+        name: activity.name.clone(),
+        summary: activity.summary.clone(),
+        published: activity.published,
+        updated: None,
+        to: Some(Vec::new()), // TODO: Extract from additional_properties
+        cc: Some(Vec::new()), // TODO: Extract from additional_properties
+        bto: None,
+        bcc: None,
+        additional_properties: None,
+        local: false,
+        status: ActivityStatus::Pending,
+        created_at: Utc::now(),
+        attempts: 0,
+        last_attempt: None,
+        error: None,
+    };
+
+    state
+        .db_manager
+        .insert_activity(activity_doc)
+        .await
+        .map_err(|e| format!("Failed to store activity: {}", e))?;
+
+    Ok(())
+}
+
+/// Store activity in database (from JSON Value - legacy)
+async fn store_activity(activity: &Value, state: &AppState) -> Result<(), String> {
     let activity_doc = ActivityDocument {
         id: None,
         activity_id: activity
@@ -896,7 +1254,7 @@ async fn store_activity(activity: &Value, state: &ActivityPubState) -> Result<()
     };
 
     state
-        .db
+        .db_manager
         .insert_activity(activity_doc)
         .await
         .map_err(|e| format!("Failed to store activity: {}", e))?;
@@ -905,7 +1263,7 @@ async fn store_activity(activity: &Value, state: &ActivityPubState) -> Result<()
 }
 
 /// Store note object in database
-async fn store_note_object(object: &Value, state: &ActivityPubState) -> Result<(), String> {
+async fn store_note_object(object: &Value, state: &AppState) -> Result<(), String> {
     let object_doc = ObjectDocument {
         id: None,
         object_id: object
@@ -976,7 +1334,7 @@ async fn store_note_object(object: &Value, state: &ActivityPubState) -> Result<(
     };
 
     state
-        .db
+        .db_manager
         .insert_object(object_doc)
         .await
         .map_err(|e| format!("Failed to store note object: {}", e))?;
@@ -985,7 +1343,7 @@ async fn store_note_object(object: &Value, state: &ActivityPubState) -> Result<(
 }
 
 /// Store article object in database
-async fn store_article_object(object: &Value, state: &ActivityPubState) -> Result<(), String> {
+async fn store_article_object(object: &Value, state: &AppState) -> Result<(), String> {
     let object_doc = ObjectDocument {
         id: None,
         object_id: object
@@ -1056,7 +1414,7 @@ async fn store_article_object(object: &Value, state: &ActivityPubState) -> Resul
     };
 
     state
-        .db
+        .db_manager
         .insert_object(object_doc)
         .await
         .map_err(|e| format!("Failed to store article object: {}", e))?;
@@ -1064,11 +1422,21 @@ async fn store_article_object(object: &Value, state: &ActivityPubState) -> Resul
     Ok(())
 }
 
-/// Publish activity to message queue for delivery
-async fn publish_activity_message(
-    activity: &Value,
-    _state: &ActivityPubState,
+/// Publish activity to message queue for delivery (from Activity struct)
+async fn publish_activity_message_struct(
+    activity: &Activity,
+    _state: &AppState,
 ) -> Result<(), String> {
+    // TODO: Implement message queue publishing
+    debug!(
+        "Publishing activity to message queue: {:?}",
+        activity.activity_type
+    );
+    Ok(())
+}
+
+/// Publish activity to message queue for delivery (legacy JSON version)
+async fn publish_activity_message(activity: &Value, _state: &AppState) -> Result<(), String> {
     // TODO: Implement message queue publishing
     debug!(
         "Publishing activity to message queue: {}",
