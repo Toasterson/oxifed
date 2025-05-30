@@ -27,7 +27,7 @@ use uuid::Uuid;
 use crate::{AppState, extract_domain_from_headers};
 
 /// Extract domain from ActivityPub activity content as fallback
-/// 
+///
 /// This function attempts to extract a domain from the activity JSON when the Host header
 /// is missing or invalid. It tries the following sources in order:
 /// 1. The `actor` field URL
@@ -49,7 +49,7 @@ fn extract_domain_from_activity(activity: &Value) -> Option<String> {
             }
         }
     }
-    
+
     // Fallback to object field if actor doesn't have a valid URL
     if let Some(object) = activity.get("object").and_then(|v| v.as_str()) {
         if let Ok(url) = Url::parse(object) {
@@ -58,18 +58,20 @@ fn extract_domain_from_activity(activity: &Value) -> Option<String> {
             }
         }
     }
-    
+
     // Try object.id if object is an embedded object
-    if let Some(object_id) = activity.get("object")
+    if let Some(object_id) = activity
+        .get("object")
         .and_then(|obj| obj.get("id"))
-        .and_then(|id| id.as_str()) {
+        .and_then(|id| id.as_str())
+    {
         if let Ok(url) = Url::parse(object_id) {
             if let Some(host) = url.host_str() {
                 return Some(host.to_string());
             }
         }
     }
-    
+
     None
 }
 
@@ -263,7 +265,10 @@ async fn post_inbox(
             // Fallback: extract domain from activity content
             match extract_domain_from_activity(&activity_json) {
                 Some(d) => {
-                    info!("Host header missing, using domain from activity content: {}", d);
+                    info!(
+                        "Host header missing, using domain from activity content: {}",
+                        d
+                    );
                     d
                 }
                 None => {
@@ -292,7 +297,10 @@ async fn post_inbox(
     // Deserialize and validate the activity
     let activity: Activity = match serde_json::from_value::<Activity>(activity_json.clone()) {
         Ok(act) => {
-            debug!("Successfully deserialized activity of type: {:?}", act.activity_type);
+            debug!(
+                "Successfully deserialized activity of type: {:?}",
+                act.activity_type
+            );
             act
         }
         Err(e) => {
@@ -320,8 +328,11 @@ async fn post_inbox(
     // Process the activity with the parsed struct
     match process_incoming_activity(&activity, &actor_doc, &state).await {
         Ok(_) => {
-            info!("Successfully processed {} activity for user: {}", 
-                  format!("{:?}", activity.activity_type), username);
+            info!(
+                "Successfully processed {} activity for user: {}",
+                format!("{:?}", activity.activity_type),
+                username
+            );
             Ok(StatusCode::ACCEPTED.into_response())
         }
         Err(e) => {
@@ -369,7 +380,10 @@ async fn post_shared_inbox(
             // Fallback: extract domain from activity content
             match extract_domain_from_activity(&activity_json) {
                 Some(d) => {
-                    info!("Host header missing, using domain from activity content: {}", d);
+                    info!(
+                        "Host header missing, using domain from activity content: {}",
+                        d
+                    );
                     d
                 }
                 None => {
@@ -383,7 +397,10 @@ async fn post_shared_inbox(
     // Deserialize and validate the activity
     let activity: Activity = match serde_json::from_value::<Activity>(activity_json.clone()) {
         Ok(act) => {
-            debug!("Successfully deserialized shared inbox activity of type: {:?}", act.activity_type);
+            debug!(
+                "Successfully deserialized shared inbox activity of type: {:?}",
+                act.activity_type
+            );
             act
         }
         Err(e) => {
@@ -395,8 +412,10 @@ async fn post_shared_inbox(
     // Process the activity with the parsed struct
     match process_shared_inbox_activity(&activity, &state).await {
         Ok(_) => {
-            info!("Successfully processed {} activity in shared inbox", 
-                  format!("{:?}", activity.activity_type));
+            info!(
+                "Successfully processed {} activity in shared inbox",
+                format!("{:?}", activity.activity_type)
+            );
             Ok(StatusCode::ACCEPTED.into_response())
         }
         Err(e) => {
@@ -887,8 +906,14 @@ async fn process_incoming_activity(
 }
 
 /// Process shared inbox activity
-async fn process_shared_inbox_activity(activity: &Activity, state: &AppState) -> Result<(), String> {
-    info!("Processing {:?} activity in shared inbox", activity.activity_type);
+async fn process_shared_inbox_activity(
+    activity: &Activity,
+    state: &AppState,
+) -> Result<(), String> {
+    info!(
+        "Processing {:?} activity in shared inbox",
+        activity.activity_type
+    );
 
     // Determine target actors and route accordingly
     // TODO: Implement proper routing based on activity addressing
@@ -945,7 +970,7 @@ async fn handle_follow_activity(
     // Create Accept activity (convert Activity back to JSON for response)
     let activity_json = serde_json::to_value(activity)
         .map_err(|e| format!("Failed to serialize activity: {}", e))?;
-    
+
     let accept_activity = json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Accept",
@@ -993,9 +1018,15 @@ async fn handle_undo_activity(
 
                                     state
                                         .db_manager
-                                        .update_follow_status(&actor.actor_id, following, FollowStatus::Cancelled)
+                                        .update_follow_status(
+                                            &actor.actor_id,
+                                            following,
+                                            FollowStatus::Cancelled,
+                                        )
                                         .await
-                                        .map_err(|e| format!("Failed to update follow status: {}", e))?;
+                                        .map_err(|e| {
+                                            format!("Failed to update follow status: {}", e)
+                                        })?;
                                 }
                             }
                         }
@@ -1392,7 +1423,10 @@ async fn store_article_object(object: &Value, state: &AppState) -> Result<(), St
 }
 
 /// Publish activity to message queue for delivery (from Activity struct)
-async fn publish_activity_message_struct(activity: &Activity, _state: &AppState) -> Result<(), String> {
+async fn publish_activity_message_struct(
+    activity: &Activity,
+    _state: &AppState,
+) -> Result<(), String> {
     // TODO: Implement message queue publishing
     debug!(
         "Publishing activity to message queue: {:?}",

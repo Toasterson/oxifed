@@ -9,7 +9,12 @@ mod delivery;
 mod rabbitmq;
 mod webfinger;
 
-use axum::{Router, http::{StatusCode, HeaderMap}, response::IntoResponse, routing::get};
+use axum::{
+    Router,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    routing::get,
+};
 use db::MongoDB;
 use oxifed::database::DatabaseManager;
 use oxifed::pki::PkiManager;
