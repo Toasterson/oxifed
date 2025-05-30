@@ -12,7 +12,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use oxifed::{
-    ActivityType, ObjectType,
+    Activity, ActivityType, ObjectType,
     database::{
         ActivityDocument, ActivityStatus, ActorDocument, ActorStatus, FollowDocument, FollowStatus,
         ObjectDocument, VisibilityLevel,
@@ -21,9 +21,57 @@ use oxifed::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::{debug, error, info, warn};
+use url::Url;
 use uuid::Uuid;
 
 use crate::{AppState, extract_domain_from_headers};
+
+/// Extract domain from ActivityPub activity content as fallback
+/// 
+/// This function attempts to extract a domain from the activity JSON when the Host header
+/// is missing or invalid. It tries the following sources in order:
+/// 1. The `actor` field URL
+/// 2. The `object` field URL (if it's a string)
+/// 3. The `object.id` field URL (if object is an embedded object)
+///
+/// # Arguments
+/// * `activity` - The ActivityPub activity as JSON Value
+///
+/// # Returns
+/// * `Some(String)` - The extracted domain if found
+/// * `None` - If no valid domain could be extracted
+fn extract_domain_from_activity(activity: &Value) -> Option<String> {
+    // Try to extract domain from actor field first
+    if let Some(actor) = activity.get("actor").and_then(|v| v.as_str()) {
+        if let Ok(url) = Url::parse(actor) {
+            if let Some(host) = url.host_str() {
+                return Some(host.to_string());
+            }
+        }
+    }
+    
+    // Fallback to object field if actor doesn't have a valid URL
+    if let Some(object) = activity.get("object").and_then(|v| v.as_str()) {
+        if let Ok(url) = Url::parse(object) {
+            if let Some(host) = url.host_str() {
+                return Some(host.to_string());
+            }
+        }
+    }
+    
+    // Try object.id if object is an embedded object
+    if let Some(object_id) = activity.get("object")
+        .and_then(|obj| obj.get("id"))
+        .and_then(|id| id.as_str()) {
+        if let Ok(url) = Url::parse(object_id) {
+            if let Some(host) = url.host_str() {
+                return Some(host.to_string());
+            }
+        }
+    }
+    
+    None
+}
 
 // ActivityPubState is no longer needed - using AppState instead
 
@@ -177,16 +225,26 @@ async fn get_actor(
 }
 
 /// Handle incoming activities to user inbox
+///
+/// This endpoint receives ActivityPub activities directed at a specific user.
+/// It implements domain fallback: if the Host header is missing or invalid,
+/// it attempts to extract the domain from the activity content itself.
+///
+/// Domain extraction precedence:
+/// 1. HTTP Host header (preferred)
+/// 2. Activity actor URL domain (fallback)
+/// 3. Activity object URL domain (fallback)
+/// 4. Activity object.id URL domain (fallback)
 async fn post_inbox(
     Path(username): Path<String>,
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(activity): Json<Value>,
+    Json(activity_json): Json<Value>,
 ) -> Result<Response, StatusCode> {
-    info!("Received activity for user inbox: {}", username);
+    info!("Received activity for user: {}", username);
     debug!(
         "Activity payload: {}",
-        serde_json::to_string_pretty(&activity).unwrap_or_default()
+        serde_json::to_string_pretty(&activity_json).unwrap_or_default()
     );
 
     // Verify HTTP signature
@@ -195,11 +253,50 @@ async fn post_inbox(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Extract domain from Host header
+    // Extract domain from Host header with fallback to activity content
     let domain = match extract_domain_from_headers(&headers) {
-        Some(d) => d,
+        Some(d) => {
+            debug!("Using domain from Host header: {}", d);
+            d
+        }
         None => {
-            error!("Missing or invalid Host header");
+            // Fallback: extract domain from activity content
+            match extract_domain_from_activity(&activity_json) {
+                Some(d) => {
+                    info!("Host header missing, using domain from activity content: {}", d);
+                    d
+                }
+                None => {
+                    error!("Cannot determine domain from Host header or activity content");
+                    return Err(StatusCode::BAD_REQUEST);
+                }
+            }
+        }
+    };
+
+    // Validate that this domain is served by our instance
+    match state.db_manager.find_domain_by_name(&domain).await {
+        Ok(Some(_)) => {
+            debug!("Confirmed domain {} is served by this instance", domain);
+        }
+        Ok(None) => {
+            warn!("Received activity for unknown domain: {}", domain);
+            return Err(StatusCode::NOT_FOUND);
+        }
+        Err(e) => {
+            error!("Database error validating domain {}: {}", domain, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // Deserialize and validate the activity
+    let activity: Activity = match serde_json::from_value::<Activity>(activity_json.clone()) {
+        Ok(act) => {
+            debug!("Successfully deserialized activity of type: {:?}", act.activity_type);
+            act
+        }
+        Err(e) => {
+            error!("Failed to deserialize activity: {}", e);
             return Err(StatusCode::BAD_REQUEST);
         }
     };
@@ -220,9 +317,13 @@ async fn post_inbox(
         return Err(StatusCode::GONE);
     }
 
-    // Process the activity
-    match process_incoming_activity(&activity, &actor_doc, &state).await {
-        Ok(_) => Ok(StatusCode::ACCEPTED.into_response()),
+    // Process the activity (pass the JSON Value for backward compatibility)
+    match process_incoming_activity(&activity_json, &actor_doc, &state).await {
+        Ok(_) => {
+            info!("Successfully processed {} activity for user: {}", 
+                  format!("{:?}", activity.activity_type), username);
+            Ok(StatusCode::ACCEPTED.into_response())
+        }
         Err(e) => {
             error!("Failed to process incoming activity: {}", e);
             Err(StatusCode::BAD_REQUEST)
@@ -231,15 +332,25 @@ async fn post_inbox(
 }
 
 /// Handle shared inbox for server-level activities
+///
+/// This endpoint receives ActivityPub activities that are server-wide or
+/// addressed to multiple users. It implements the same domain fallback
+/// mechanism as the user inbox, and additionally validates that the
+/// extracted domain is actually served by this instance.
+///
+/// Domain extraction and validation:
+/// 1. Extract domain from Host header or activity content
+/// 2. Validate domain exists in our database
+/// 3. Process activity if domain is valid
 async fn post_shared_inbox(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(activity): Json<Value>,
+    Json(activity_json): Json<Value>,
 ) -> Result<Response, StatusCode> {
     info!("Received activity for shared inbox");
     debug!(
         "Activity payload: {}",
-        serde_json::to_string_pretty(&activity).unwrap_or_default()
+        serde_json::to_string_pretty(&activity_json).unwrap_or_default()
     );
 
     // Verify HTTP signature
@@ -248,9 +359,46 @@ async fn post_shared_inbox(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Process the activity
-    match process_shared_inbox_activity(&activity, &state).await {
-        Ok(_) => Ok(StatusCode::ACCEPTED.into_response()),
+    // Extract domain from Host header with fallback to activity content
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => {
+            debug!("Using domain from Host header: {}", d);
+            d
+        }
+        None => {
+            // Fallback: extract domain from activity content
+            match extract_domain_from_activity(&activity_json) {
+                Some(d) => {
+                    info!("Host header missing, using domain from activity content: {}", d);
+                    d
+                }
+                None => {
+                    error!("Cannot determine domain from Host header or activity content");
+                    return Err(StatusCode::BAD_REQUEST);
+                }
+            }
+        }
+    };
+
+    // Deserialize and validate the activity
+    let activity: Activity = match serde_json::from_value::<Activity>(activity_json.clone()) {
+        Ok(act) => {
+            debug!("Successfully deserialized shared inbox activity of type: {:?}", act.activity_type);
+            act
+        }
+        Err(e) => {
+            error!("Failed to deserialize shared inbox activity: {}", e);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    // Process the activity (pass the JSON Value for backward compatibility)
+    match process_shared_inbox_activity(&activity_json, &state).await {
+        Ok(_) => {
+            info!("Successfully processed {} activity in shared inbox", 
+                  format!("{:?}", activity.activity_type));
+            Ok(StatusCode::ACCEPTED.into_response())
+        }
         Err(e) => {
             error!("Failed to process shared inbox activity: {}", e);
             Err(StatusCode::BAD_REQUEST)
