@@ -895,7 +895,9 @@ async fn process_incoming_activity(
     match activity.activity_type {
         ActivityType::Follow => handle_follow_activity(activity, actor, state).await,
         ActivityType::Undo => handle_undo_activity(activity, actor, state).await,
-        ActivityType::Create => handle_create_activity(activity, actor, state, domain, Some(username)).await,
+        ActivityType::Create => {
+            handle_create_activity(activity, actor, state, domain, Some(username)).await
+        }
         ActivityType::Update => handle_update_activity(activity, actor, state).await,
         ActivityType::Delete => handle_delete_activity(activity, actor, state).await,
         ActivityType::Like => handle_like_activity(activity, actor, state).await,
@@ -925,14 +927,16 @@ async fn process_shared_inbox_activity(
     // Send the activity to the incoming processing exchange instead of storing directly
     let activity_json = serde_json::to_value(activity)
         .map_err(|e| format!("Failed to serialize activity: {}", e))?;
-    
-    let actor_id = activity.actor.as_ref()
+
+    let actor_id = activity
+        .actor
+        .as_ref()
         .and_then(|actor| match actor {
             oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
             _ => None,
         })
         .unwrap_or("unknown");
-    
+
     crate::rabbitmq::publish_incoming_activity_to_exchange(
         &state.mq_pool,
         &activity_json,
@@ -941,7 +945,8 @@ async fn process_shared_inbox_activity(
         domain,
         None,
         None,
-    ).await
+    )
+    .await
     .map_err(|e| format!("Failed to publish activity to incoming exchange: {}", e))
 }
 
@@ -1092,14 +1097,18 @@ async fn handle_create_activity(
                 if let Some(object_type) = type_val.as_str() {
                     match object_type {
                         "Note" | "Article" => {
-                            info!("Sending {} creation from {} to incoming processing exchange", object_type, actor.actor_id);
+                            info!(
+                                "Sending {} creation from {} to incoming processing exchange",
+                                object_type, actor.actor_id
+                            );
                             let object_json = serde_json::to_value(obj)
                                 .map_err(|e| format!("Failed to serialize object: {}", e))?;
-                            
-                            let attributed_to = object_json.get("attributedTo")
+
+                            let attributed_to = object_json
+                                .get("attributedTo")
                                 .and_then(|a| a.as_str())
                                 .unwrap_or(&actor.actor_id);
-                            
+
                             crate::rabbitmq::publish_incoming_object_to_exchange(
                                 &state.mq_pool,
                                 &object_json,
@@ -1108,8 +1117,11 @@ async fn handle_create_activity(
                                 domain,
                                 username,
                                 None,
-                            ).await
-                            .map_err(|e| format!("Failed to publish object to incoming exchange: {}", e))?;
+                            )
+                            .await
+                            .map_err(|e| {
+                                format!("Failed to publish object to incoming exchange: {}", e)
+                            })?;
                         }
                         _ => {
                             warn!("Unhandled create object type: {}", object_type);
@@ -1130,14 +1142,16 @@ async fn handle_create_activity(
     // Send the activity to the incoming processing exchange instead of storing directly
     let activity_json = serde_json::to_value(activity)
         .map_err(|e| format!("Failed to serialize activity: {}", e))?;
-    
-    let actor_id = activity.actor.as_ref()
+
+    let actor_id = activity
+        .actor
+        .as_ref()
         .and_then(|actor| match actor {
             oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
             _ => None,
         })
         .unwrap_or(&actor.actor_id);
-    
+
     crate::rabbitmq::publish_incoming_activity_to_exchange(
         &state.mq_pool,
         &activity_json,
@@ -1146,7 +1160,8 @@ async fn handle_create_activity(
         domain,
         username,
         None,
-    ).await
+    )
+    .await
     .map_err(|e| format!("Failed to publish activity to incoming exchange: {}", e))
 }
 

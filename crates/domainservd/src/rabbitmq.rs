@@ -22,8 +22,8 @@ use oxifed::messaging::{
     RejectActivityMessage,
 };
 use oxifed::messaging::{
-    EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INCOMING_PROCESS, EXCHANGE_INTERNAL_PUBLISH, EXCHANGE_RPC_REQUEST,
-    EXCHANGE_RPC_RESPONSE, QUEUE_RPC_DOMAIN,
+    EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INCOMING_PROCESS, EXCHANGE_INTERNAL_PUBLISH,
+    EXCHANGE_RPC_REQUEST, EXCHANGE_RPC_RESPONSE, QUEUE_RPC_DOMAIN,
 };
 use serde::de::Error;
 use std::sync::Arc;
@@ -89,7 +89,9 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
     let channel = conn.create_channel().await?;
 
     // Enable publisher confirms for deliver-once semantics
-    channel.confirm_select(lapin::options::ConfirmSelectOptions::default()).await?;
+    channel
+        .confirm_select(lapin::options::ConfirmSelectOptions::default())
+        .await?;
 
     // Declare the internal publish exchange - fanout exchange for internal services
     channel
@@ -177,10 +179,10 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
     // These queues will be bound to processing pipeline exchanges by individual daemons
     let pipeline_queues = [
         "oxifed.incoming.validation",
-        "oxifed.incoming.spam_filter", 
+        "oxifed.incoming.spam_filter",
         "oxifed.incoming.moderation",
         "oxifed.incoming.relationship_verify",
-        "oxifed.incoming.storage"
+        "oxifed.incoming.storage",
     ];
 
     for queue_name in &pipeline_queues {
@@ -188,19 +190,28 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
             .queue_declare(
                 queue_name,
                 QueueDeclareOptions {
-                    durable: true,           // Survive broker restart
-                    auto_delete: false,      // Don't auto-delete when no consumers
-                    exclusive: false,        // Allow multiple consumers
+                    durable: true,      // Survive broker restart
+                    auto_delete: false, // Don't auto-delete when no consumers
+                    exclusive: false,   // Allow multiple consumers
                     ..Default::default()
                 },
                 {
                     let mut args = FieldTable::default();
                     // Enable quorum queues for better deliver-once guarantees
-                    args.insert("x-queue-type".into(), lapin::types::AMQPValue::LongString("quorum".into()));
+                    args.insert(
+                        "x-queue-type".into(),
+                        lapin::types::AMQPValue::LongString("quorum".into()),
+                    );
                     // Set message TTL to prevent infinite retention
-                    args.insert("x-message-ttl".into(), lapin::types::AMQPValue::LongLongInt(1800000)); // 30 minutes
+                    args.insert(
+                        "x-message-ttl".into(),
+                        lapin::types::AMQPValue::LongLongInt(1800000),
+                    ); // 30 minutes
                     // Enable dead letter exchange for failed messages
-                    args.insert("x-dead-letter-exchange".into(), lapin::types::AMQPValue::LongString("oxifed.dlx".into()));
+                    args.insert(
+                        "x-dead-letter-exchange".into(),
+                        lapin::types::AMQPValue::LongString("oxifed.dlx".into()),
+                    );
                     args
                 },
             )
@@ -444,12 +455,16 @@ async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQE
         }
         MessageEnum::IncomingObjectMessage(_) => {
             // Incoming objects should be processed by dedicated incoming processing daemons
-            warn!("IncomingObjectMessage should not be processed by domainservd - it should be handled by dedicated processing daemons");
+            warn!(
+                "IncomingObjectMessage should not be processed by domainservd - it should be handled by dedicated processing daemons"
+            );
             Ok(())
         }
         MessageEnum::IncomingActivityMessage(_) => {
             // Incoming activities should be processed by dedicated incoming processing daemons
-            warn!("IncomingActivityMessage should not be processed by domainservd - it should be handled by dedicated processing daemons");
+            warn!(
+                "IncomingActivityMessage should not be processed by domainservd - it should be handled by dedicated processing daemons"
+            );
             Ok(())
         }
     }
@@ -940,7 +955,9 @@ pub async fn publish_incoming_object_to_exchange(
     let channel = conn.create_channel().await?;
 
     // Enable publisher confirms for this channel (deliver-once semantics)
-    channel.confirm_select(lapin::options::ConfirmSelectOptions::default()).await?;
+    channel
+        .confirm_select(lapin::options::ConfirmSelectOptions::default())
+        .await?;
 
     // Create the incoming object message
     let incoming_message = oxifed::messaging::IncomingObjectMessage {
@@ -957,8 +974,10 @@ pub async fn publish_incoming_object_to_exchange(
     let message_json = serde_json::to_vec(&incoming_message)?;
 
     // Generate unique message ID for idempotency
-    let message_id = format!("{}-{}", 
-        object.get("id")
+    let message_id = format!(
+        "{}-{}",
+        object
+            .get("id")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown"),
         chrono::Utc::now().timestamp_millis()
@@ -1007,7 +1026,9 @@ pub async fn publish_incoming_activity_to_exchange(
     let channel = conn.create_channel().await?;
 
     // Enable publisher confirms for this channel (deliver-once semantics)
-    channel.confirm_select(lapin::options::ConfirmSelectOptions::default()).await?;
+    channel
+        .confirm_select(lapin::options::ConfirmSelectOptions::default())
+        .await?;
 
     // Create the incoming activity message
     let incoming_message = oxifed::messaging::IncomingActivityMessage {
@@ -1024,8 +1045,10 @@ pub async fn publish_incoming_activity_to_exchange(
     let message_json = serde_json::to_vec(&incoming_message)?;
 
     // Generate unique message ID for idempotency
-    let message_id = format!("{}-{}", 
-        activity.get("id")
+    let message_id = format!(
+        "{}-{}",
+        activity
+            .get("id")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown"),
         chrono::Utc::now().timestamp_millis()
