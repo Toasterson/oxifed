@@ -14,8 +14,8 @@ use chrono::{DateTime, Utc};
 use oxifed::{
     ActivityType, ObjectType,
     database::{
-        ActivityDocument, ActivityStatus, ActorDocument, ActorStatus,
-        FollowDocument, FollowStatus, ObjectDocument, VisibilityLevel,
+        ActivityDocument, ActivityStatus, ActorDocument, ActorStatus, FollowDocument, FollowStatus,
+        ObjectDocument, VisibilityLevel,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -360,7 +360,11 @@ async fn get_followers(
         return Err(StatusCode::GONE);
     }
 
-    let followers = match state.db_manager.get_actor_followers(&actor_doc.actor_id).await {
+    let followers = match state
+        .db_manager
+        .get_actor_followers(&actor_doc.actor_id)
+        .await
+    {
         Ok(followers) => followers,
         Err(e) => {
             error!("Failed to get followers: {}", e);
@@ -412,7 +416,11 @@ async fn get_following(
         return Err(StatusCode::GONE);
     }
 
-    let following = match state.db_manager.get_actor_following(&actor_doc.actor_id).await {
+    let following = match state
+        .db_manager
+        .get_actor_following(&actor_doc.actor_id)
+        .await
+    {
         Ok(following) => following,
         Err(e) => {
             error!("Failed to get following: {}", e);
@@ -611,10 +619,7 @@ async fn get_nodeinfo(State(state): State<AppState>) -> Result<Response, StatusC
 }
 
 /// Verify HTTP signature
-async fn verify_http_signature(
-    _headers: &HeaderMap,
-    _state: &AppState,
-) -> Result<(), String> {
+async fn verify_http_signature(_headers: &HeaderMap, _state: &AppState) -> Result<(), String> {
     // TODO: Implement proper HTTP signature verification using PKI
     debug!("HTTP signature verification - placeholder implementation");
     Ok(())
@@ -652,10 +657,7 @@ async fn process_incoming_activity(
 }
 
 /// Process shared inbox activity
-async fn process_shared_inbox_activity(
-    activity: &Value,
-    state: &AppState,
-) -> Result<(), String> {
+async fn process_shared_inbox_activity(activity: &Value, state: &AppState) -> Result<(), String> {
     let activity_type = activity
         .get("type")
         .and_then(|t| t.as_str())
@@ -1057,10 +1059,7 @@ async fn store_article_object(object: &Value, state: &AppState) -> Result<(), St
 }
 
 /// Publish activity to message queue for delivery
-async fn publish_activity_message(
-    activity: &Value,
-    _state: &AppState,
-) -> Result<(), String> {
+async fn publish_activity_message(activity: &Value, _state: &AppState) -> Result<(), String> {
     // TODO: Implement message queue publishing
     debug!(
         "Publishing activity to message queue: {}",

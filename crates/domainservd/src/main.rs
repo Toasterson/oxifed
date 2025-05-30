@@ -117,8 +117,6 @@ async fn main() -> Result<(), DomainservdError> {
     // Start message consumer in a separate task
     rabbitmq::start_consumers(mq_pool, db.clone()).await?;
 
-
-
     let app = Router::new()
         .route("/health", get(health_check))
         .merge(webfinger::webfinger_router(app_state.clone()))
