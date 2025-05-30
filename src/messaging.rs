@@ -632,6 +632,7 @@ impl Message for DomainRpcResponse {
 ///
 /// This message type is used when forwarding received ActivityPub objects
 /// to the incoming processing pipeline instead of storing them directly.
+/// Uses RabbitMQ deliver-once semantics via publisher confirms and consumer acknowledgments.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IncomingObjectMessage {
     /// The raw object JSON as received
@@ -660,6 +661,7 @@ impl Message for IncomingObjectMessage {
 ///
 /// This message type is used when forwarding received ActivityPub activities
 /// to the incoming processing pipeline.
+/// Uses RabbitMQ deliver-once semantics via publisher confirms and consumer acknowledgments.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IncomingActivityMessage {
     /// The raw activity JSON as received

@@ -934,6 +934,7 @@ async fn process_shared_inbox_activity(
         .unwrap_or("unknown");
     
     crate::rabbitmq::publish_incoming_activity_to_exchange(
+        &state.mq_pool,
         &activity_json,
         &format!("{:?}", activity.activity_type),
         actor_id,
@@ -1100,6 +1101,7 @@ async fn handle_create_activity(
                                 .unwrap_or(&actor.actor_id);
                             
                             crate::rabbitmq::publish_incoming_object_to_exchange(
+                                &state.mq_pool,
                                 &object_json,
                                 object_type,
                                 attributed_to,
@@ -1137,6 +1139,7 @@ async fn handle_create_activity(
         .unwrap_or(&actor.actor_id);
     
     crate::rabbitmq::publish_incoming_activity_to_exchange(
+        &state.mq_pool,
         &activity_json,
         &format!("{:?}", activity.activity_type),
         actor_id,

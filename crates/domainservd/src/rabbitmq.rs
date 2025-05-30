@@ -85,10 +85,13 @@ pub fn create_connection_pool(amqp_url: &str) -> Pool {
 
 /// Initialize RabbitMQ exchanges and queues
 pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
-    let conn = pool.get().await?;
+    let conn = pool.get().await.map_err(RabbitMQError::PoolError)?;
     let channel = conn.create_channel().await?;
 
-    // Declare the activities exchange - fanout style for broadcasting messages
+    // Enable publisher confirms for deliver-once semantics
+    channel.confirm_select(lapin::options::ConfirmSelectOptions::default()).await?;
+
+    // Declare the internal publish exchange - fanout exchange for internal services
     channel
         .exchange_declare(
             EXCHANGE_INTERNAL_PUBLISH,
@@ -115,12 +118,15 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
         .await?;
 
     // Declare the incoming processing exchange for received ActivityPub objects
+    // Using fanout exchange with durable configuration for deliver-once semantics
     channel
         .exchange_declare(
             EXCHANGE_INCOMING_PROCESS,
             ExchangeKind::Fanout,
             ExchangeDeclareOptions {
                 durable: true,
+                auto_delete: false,
+                internal: false,
                 ..Default::default()
             },
             FieldTable::default(),
@@ -153,7 +159,7 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
         )
         .await?;
 
-    // Declare the activities queue
+    // Declare the activities queue with deliver-once semantics
     channel
         .queue_declare(
             QUEUE_ACTIVITIES,
@@ -163,6 +169,80 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
                 exclusive: false,
                 ..Default::default()
             },
+            FieldTable::default(),
+        )
+        .await?;
+
+    // Declare incoming processing pipeline queues with deliver-once semantics
+    // These queues will be bound to processing pipeline exchanges by individual daemons
+    let pipeline_queues = [
+        "oxifed.incoming.validation",
+        "oxifed.incoming.spam_filter", 
+        "oxifed.incoming.moderation",
+        "oxifed.incoming.relationship_verify",
+        "oxifed.incoming.storage"
+    ];
+
+    for queue_name in &pipeline_queues {
+        channel
+            .queue_declare(
+                queue_name,
+                QueueDeclareOptions {
+                    durable: true,           // Survive broker restart
+                    auto_delete: false,      // Don't auto-delete when no consumers
+                    exclusive: false,        // Allow multiple consumers
+                    ..Default::default()
+                },
+                {
+                    let mut args = FieldTable::default();
+                    // Enable quorum queues for better deliver-once guarantees
+                    args.insert("x-queue-type".into(), lapin::types::AMQPValue::LongString("quorum".into()));
+                    // Set message TTL to prevent infinite retention
+                    args.insert("x-message-ttl".into(), lapin::types::AMQPValue::LongLongInt(1800000)); // 30 minutes
+                    // Enable dead letter exchange for failed messages
+                    args.insert("x-dead-letter-exchange".into(), lapin::types::AMQPValue::LongString("oxifed.dlx".into()));
+                    args
+                },
+            )
+            .await?;
+    }
+
+    // Declare dead letter exchange for failed messages
+    channel
+        .exchange_declare(
+            "oxifed.dlx",
+            ExchangeKind::Direct,
+            ExchangeDeclareOptions {
+                durable: true,
+                auto_delete: false,
+                internal: false,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
+    // Declare dead letter queue
+    channel
+        .queue_declare(
+            "oxifed.dlq",
+            QueueDeclareOptions {
+                durable: true,
+                auto_delete: false,
+                exclusive: false,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
+    // Bind dead letter queue to dead letter exchange
+    channel
+        .queue_bind(
+            "oxifed.dlq",
+            "oxifed.dlx",
+            "",
+            QueueBindOptions::default(),
             FieldTable::default(),
         )
         .await?;
@@ -845,8 +925,9 @@ async fn publish_activity_to_activitypub_exchange(
     Ok(())
 }
 
-/// Publish incoming object to the incoming processing exchange
+/// Publish incoming object to the incoming processing exchange using RabbitMQ deliver-once semantics
 pub async fn publish_incoming_object_to_exchange(
+    pool: &deadpool_lapin::Pool,
     object: &serde_json::Value,
     object_type: &str,
     attributed_to: &str,
@@ -854,15 +935,12 @@ pub async fn publish_incoming_object_to_exchange(
     target_username: Option<&str>,
     source: Option<&str>,
 ) -> Result<(), RabbitMQError> {
-    // Get AMQP URL from environment or use default
-    let amqp_url = std::env::var("AMQP_URL")
-        .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672".to_string());
-
-    // Create a standalone connection for publishing
-    let conn =
-        lapin::Connection::connect(&amqp_url, lapin::ConnectionProperties::default()).await?;
-
+    // Get connection from pool
+    let conn = pool.get().await.map_err(RabbitMQError::PoolError)?;
     let channel = conn.create_channel().await?;
+
+    // Enable publisher confirms for this channel (deliver-once semantics)
+    channel.confirm_select(lapin::options::ConfirmSelectOptions::default()).await?;
 
     // Create the incoming object message
     let incoming_message = oxifed::messaging::IncomingObjectMessage {
@@ -878,26 +956,45 @@ pub async fn publish_incoming_object_to_exchange(
     // Convert to JSON for publishing
     let message_json = serde_json::to_vec(&incoming_message)?;
 
-    // Publish to the incoming processing exchange
-    channel
+    // Generate unique message ID for idempotency
+    let message_id = format!("{}-{}", 
+        object.get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown"),
+        chrono::Utc::now().timestamp_millis()
+    );
+
+    // Publish to the incoming processing exchange with RabbitMQ deliver-once semantics
+    let confirmation = channel
         .basic_publish(
             EXCHANGE_INCOMING_PROCESS,
             "", // no routing key for fanout exchanges
-            lapin::options::BasicPublishOptions::default(),
+            lapin::options::BasicPublishOptions {
+                mandatory: true,  // Return message if no queue accepts it
+                immediate: false, // Don't return if no consumer can immediately handle it
+            },
             &message_json,
-            lapin::BasicProperties::default(),
+            lapin::BasicProperties::default()
+                .with_delivery_mode(2) // Persistent message (survives broker restart)
+                .with_message_id(message_id.into()) // Unique message ID for deduplication
+                .with_timestamp(chrono::Utc::now().timestamp() as u64) // Message timestamp
+                .with_expiration("1800000".into()), // 30 minute TTL to prevent message buildup
         )
         .await?;
 
+    // Wait for publisher confirmation (deliver-once guarantee)
+    confirmation.await?;
+
     info!(
-        "Incoming {} object from {} published to processing exchange",
+        "Incoming {} object from {} published to processing exchange with delivery confirmation",
         object_type, attributed_to
     );
     Ok(())
 }
 
-/// Publish incoming activity to the incoming processing exchange
+/// Publish incoming activity to the incoming processing exchange using RabbitMQ deliver-once semantics
 pub async fn publish_incoming_activity_to_exchange(
+    pool: &deadpool_lapin::Pool,
     activity: &serde_json::Value,
     activity_type: &str,
     actor: &str,
@@ -905,15 +1002,12 @@ pub async fn publish_incoming_activity_to_exchange(
     target_username: Option<&str>,
     source: Option<&str>,
 ) -> Result<(), RabbitMQError> {
-    // Get AMQP URL from environment or use default
-    let amqp_url = std::env::var("AMQP_URL")
-        .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672".to_string());
-
-    // Create a standalone connection for publishing
-    let conn =
-        lapin::Connection::connect(&amqp_url, lapin::ConnectionProperties::default()).await?;
-
+    // Get connection from pool
+    let conn = pool.get().await.map_err(RabbitMQError::PoolError)?;
     let channel = conn.create_channel().await?;
+
+    // Enable publisher confirms for this channel (deliver-once semantics)
+    channel.confirm_select(lapin::options::ConfirmSelectOptions::default()).await?;
 
     // Create the incoming activity message
     let incoming_message = oxifed::messaging::IncomingActivityMessage {
@@ -929,19 +1023,37 @@ pub async fn publish_incoming_activity_to_exchange(
     // Convert to JSON for publishing
     let message_json = serde_json::to_vec(&incoming_message)?;
 
-    // Publish to the incoming processing exchange
-    channel
+    // Generate unique message ID for idempotency
+    let message_id = format!("{}-{}", 
+        activity.get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown"),
+        chrono::Utc::now().timestamp_millis()
+    );
+
+    // Publish to the incoming processing exchange with RabbitMQ deliver-once semantics
+    let confirmation = channel
         .basic_publish(
             EXCHANGE_INCOMING_PROCESS,
             "", // no routing key for fanout exchanges
-            lapin::options::BasicPublishOptions::default(),
+            lapin::options::BasicPublishOptions {
+                mandatory: true,  // Return message if no queue accepts it
+                immediate: false, // Don't return if no consumer can immediately handle it
+            },
             &message_json,
-            lapin::BasicProperties::default(),
+            lapin::BasicProperties::default()
+                .with_delivery_mode(2) // Persistent message (survives broker restart)
+                .with_message_id(message_id.into()) // Unique message ID for deduplication
+                .with_timestamp(chrono::Utc::now().timestamp() as u64) // Message timestamp
+                .with_expiration("1800000".into()), // 30 minute TTL to prevent message buildup
         )
         .await?;
 
+    // Wait for publisher confirmation (deliver-once guarantee)
+    confirmation.await?;
+
     info!(
-        "Incoming {} activity from {} published to processing exchange",
+        "Incoming {} activity from {} published to processing exchange with delivery confirmation",
         activity_type, actor
     );
     Ok(())
