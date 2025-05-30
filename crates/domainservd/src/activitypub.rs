@@ -317,8 +317,8 @@ async fn post_inbox(
         return Err(StatusCode::GONE);
     }
 
-    // Process the activity (pass the JSON Value for backward compatibility)
-    match process_incoming_activity(&activity_json, &actor_doc, &state).await {
+    // Process the activity with the parsed struct
+    match process_incoming_activity(&activity, &actor_doc, &state).await {
         Ok(_) => {
             info!("Successfully processed {} activity for user: {}", 
                   format!("{:?}", activity.activity_type), username);
@@ -392,8 +392,8 @@ async fn post_shared_inbox(
         }
     };
 
-    // Process the activity (pass the JSON Value for backward compatibility)
-    match process_shared_inbox_activity(&activity_json, &state).await {
+    // Process the activity with the parsed struct
+    match process_shared_inbox_activity(&activity, &state).await {
         Ok(_) => {
             info!("Successfully processed {} activity in shared inbox", 
                   format!("{:?}", activity.activity_type));
@@ -862,64 +862,56 @@ async fn verify_http_signature(_headers: &HeaderMap, _state: &AppState) -> Resul
 
 /// Process incoming activity for a specific user
 async fn process_incoming_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
     state: &AppState,
 ) -> Result<(), String> {
-    let activity_type = activity
-        .get("type")
-        .and_then(|t| t.as_str())
-        .ok_or("Missing activity type")?;
-
     info!(
-        "Processing {} activity for {}",
-        activity_type, actor.actor_id
+        "Processing {:?} activity for {}",
+        activity.activity_type, actor.actor_id
     );
 
-    match activity_type {
-        "Follow" => handle_follow_activity(activity, actor, state).await,
-        "Undo" => handle_undo_activity(activity, actor, state).await,
-        "Create" => handle_create_activity(activity, actor, state).await,
-        "Update" => handle_update_activity(activity, actor, state).await,
-        "Delete" => handle_delete_activity(activity, actor, state).await,
-        "Like" => handle_like_activity(activity, actor, state).await,
-        "Announce" => handle_announce_activity(activity, actor, state).await,
+    match activity.activity_type {
+        ActivityType::Follow => handle_follow_activity(activity, actor, state).await,
+        ActivityType::Undo => handle_undo_activity(activity, actor, state).await,
+        ActivityType::Create => handle_create_activity(activity, actor, state).await,
+        ActivityType::Update => handle_update_activity(activity, actor, state).await,
+        ActivityType::Delete => handle_delete_activity(activity, actor, state).await,
+        ActivityType::Like => handle_like_activity(activity, actor, state).await,
+        ActivityType::Announce => handle_announce_activity(activity, actor, state).await,
         _ => {
-            warn!("Unhandled activity type: {}", activity_type);
+            warn!("Unhandled activity type: {:?}", activity.activity_type);
             Ok(())
         }
     }
 }
 
 /// Process shared inbox activity
-async fn process_shared_inbox_activity(activity: &Value, state: &AppState) -> Result<(), String> {
-    let activity_type = activity
-        .get("type")
-        .and_then(|t| t.as_str())
-        .ok_or("Missing activity type")?;
-
-    info!("Processing {} activity in shared inbox", activity_type);
+async fn process_shared_inbox_activity(activity: &Activity, state: &AppState) -> Result<(), String> {
+    info!("Processing {:?} activity in shared inbox", activity.activity_type);
 
     // Determine target actors and route accordingly
-    if let Some(to) = activity.get("to") {
-        // Route to specific actors if needed
-        debug!("Activity addressed to: {:?}", to);
-    }
+    // TODO: Implement proper routing based on activity addressing
+    debug!("Processing activity ID: {:?}", activity.id);
 
-    // For now, just store the activity
-    store_activity(activity, state).await
+    // Store the activity using the typed version
+    store_activity_struct(activity, state).await
 }
 
 /// Handle Follow activity
 async fn handle_follow_activity(
-    activity: &Value,
+    activity: &Activity,
     target_actor: &ActorDocument,
     state: &AppState,
 ) -> Result<(), String> {
     let follower = activity
-        .get("actor")
-        .and_then(|a| a.as_str())
-        .ok_or("Missing follower actor")?;
+        .actor
+        .as_ref()
+        .and_then(|actor| match actor {
+            oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
+            _ => None, // TODO: Handle embedded actor objects
+        })
+        .ok_or("Missing or invalid actor in follow activity")?;
 
     info!(
         "Processing follow from {} to {}",
@@ -933,8 +925,9 @@ async fn handle_follow_activity(
         following: target_actor.actor_id.clone(),
         status: FollowStatus::Pending,
         activity_id: activity
-            .get("id")
-            .and_then(|id| id.as_str())
+            .id
+            .as_ref()
+            .map(|url| url.as_str())
             .unwrap_or("unknown")
             .to_string(),
         accept_activity_id: None,
@@ -949,12 +942,16 @@ async fn handle_follow_activity(
         .map_err(|e| format!("Failed to store follow: {}", e))?;
 
     // Auto-accept for now (TODO: Check actor preferences)
+    // Create Accept activity (convert Activity back to JSON for response)
+    let activity_json = serde_json::to_value(activity)
+        .map_err(|e| format!("Failed to serialize activity: {}", e))?;
+    
     let accept_activity = json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Accept",
         "id": format!("{}/activities/{}", target_actor.actor_id, Uuid::new_v4()),
         "actor": target_actor.actor_id,
-        "object": activity,
+        "object": activity_json,
         "published": Utc::now().to_rfc3339()
     });
 
@@ -973,108 +970,209 @@ async fn handle_follow_activity(
 
 /// Handle Undo activity
 async fn handle_undo_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
     state: &AppState,
 ) -> Result<(), String> {
-    let object = activity.get("object").ok_or("Missing undo object")?;
+    let object = activity.object.as_ref().ok_or("Missing undo object")?;
 
-    if let Some(object_type) = object.get("type").and_then(|t| t.as_str()) {
-        match object_type {
-            "Follow" => {
-                let following = object
-                    .get("object")
-                    .and_then(|o| o.as_str())
-                    .ok_or("Missing follow target")?;
+    match object {
+        oxifed::ObjectOrLink::Object(obj) => {
+            // Handle embedded objects - check additional_properties for type
+            if let Some(type_val) = obj.additional_properties.get("type") {
+                if let Some(object_type) = type_val.as_str() {
+                    match object_type {
+                        "Follow" => {
+                            // Extract target from embedded follow object
+                            if let Some(target) = obj.additional_properties.get("object") {
+                                if let Some(following) = target.as_str() {
+                                    info!(
+                                        "Processing undo follow: {} unfollowing {}",
+                                        actor.actor_id, following
+                                    );
 
-                info!(
-                    "Processing unfollow from {} to {}",
-                    actor.actor_id, following
-                );
-
-                state
-                    .db_manager
-                    .update_follow_status(&actor.actor_id, following, FollowStatus::Cancelled)
-                    .await
-                    .map_err(|e| format!("Failed to update follow status: {}", e))?;
+                                    state
+                                        .db_manager
+                                        .update_follow_status(&actor.actor_id, following, FollowStatus::Cancelled)
+                                        .await
+                                        .map_err(|e| format!("Failed to update follow status: {}", e))?;
+                                }
+                            }
+                        }
+                        _ => {
+                            warn!("Unhandled undo object type: {}", object_type);
+                        }
+                    }
+                }
             }
-            _ => {
-                warn!("Unhandled undo object type: {}", object_type);
-            }
+        }
+        oxifed::ObjectOrLink::Url(url) => {
+            // Handle URL reference - would need to fetch the object
+            warn!("Undo with URL reference not yet implemented: {}", url);
+        }
+        _ => {
+            warn!("Unhandled undo object format");
         }
     }
 
+    // Store the activity for record keeping
+    let activity_json = serde_json::to_value(activity)
+        .map_err(|e| format!("Failed to serialize activity: {}", e))?;
+    store_activity(&activity_json, state).await?;
     Ok(())
 }
 
 /// Handle Create activity
 async fn handle_create_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
     state: &AppState,
 ) -> Result<(), String> {
-    let object = activity.get("object").ok_or("Missing create object")?;
+    let object = activity.object.as_ref().ok_or("Missing create object")?;
 
-    if let Some(object_type) = object.get("type").and_then(|t| t.as_str()) {
-        match object_type {
-            "Note" => {
-                info!("Processing note creation from {}", actor.actor_id);
-                store_note_object(object, state).await?;
+    match object {
+        oxifed::ObjectOrLink::Object(obj) => {
+            // Determine object type from the Object struct
+            if let Some(type_val) = obj.additional_properties.get("type") {
+                if let Some(object_type) = type_val.as_str() {
+                    match object_type {
+                        "Note" => {
+                            info!("Processing note creation from {}", actor.actor_id);
+                            let object_json = serde_json::to_value(obj)
+                                .map_err(|e| format!("Failed to serialize object: {}", e))?;
+                            store_note_object(&object_json, state).await?;
+                        }
+                        "Article" => {
+                            info!("Processing article creation from {}", actor.actor_id);
+                            let object_json = serde_json::to_value(obj)
+                                .map_err(|e| format!("Failed to serialize object: {}", e))?;
+                            store_article_object(&object_json, state).await?;
+                        }
+                        _ => {
+                            warn!("Unhandled create object type: {}", object_type);
+                        }
+                    }
+                }
             }
-            "Article" => {
-                info!("Processing article creation from {}", actor.actor_id);
-                store_article_object(object, state).await?;
-            }
-            _ => {
-                warn!("Unhandled create object type: {}", object_type);
-            }
+        }
+        oxifed::ObjectOrLink::Url(url) => {
+            info!("Create activity with URL reference: {}", url);
+            // Would need to fetch the object to determine type
+        }
+        _ => {
+            warn!("Unhandled create object format");
         }
     }
 
-    store_activity(activity, state).await
+    // Store the activity
+    let activity_json = serde_json::to_value(activity)
+        .map_err(|e| format!("Failed to serialize activity: {}", e))?;
+    store_activity(&activity_json, state).await
 }
 
 /// Handle Update activity
 async fn handle_update_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
     state: &AppState,
 ) -> Result<(), String> {
     info!("Processing update activity from {}", actor.actor_id);
-    store_activity(activity, state).await
+    store_activity_struct(activity, state).await
 }
 
 /// Handle Delete activity
 async fn handle_delete_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
     state: &AppState,
 ) -> Result<(), String> {
     info!("Processing delete activity from {}", actor.actor_id);
-    store_activity(activity, state).await
+    store_activity_struct(activity, state).await
 }
 
 /// Handle Like activity
 async fn handle_like_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
     state: &AppState,
 ) -> Result<(), String> {
     info!("Processing like activity from {}", actor.actor_id);
-    store_activity(activity, state).await
+    store_activity_struct(activity, state).await
 }
 
 /// Handle Announce activity
 async fn handle_announce_activity(
-    activity: &Value,
+    activity: &Activity,
     actor: &ActorDocument,
     state: &AppState,
 ) -> Result<(), String> {
     info!("Processing announce activity from {}", actor.actor_id);
-    store_activity(activity, state).await
+    store_activity_struct(activity, state).await
 }
 
-/// Store activity in database
+/// Store activity in database (from typed Activity struct)
+async fn store_activity_struct(activity: &Activity, state: &AppState) -> Result<(), String> {
+    let activity_doc = ActivityDocument {
+        id: None,
+        activity_id: activity
+            .id
+            .as_ref()
+            .map(|url| url.as_str())
+            .unwrap_or(&format!("unknown-{}", Uuid::new_v4()))
+            .to_string(),
+        activity_type: activity.activity_type.clone(),
+        actor: activity
+            .actor
+            .as_ref()
+            .and_then(|actor| match actor {
+                oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
+                _ => None,
+            })
+            .unwrap_or("unknown")
+            .to_string(),
+        object: activity
+            .object
+            .as_ref()
+            .and_then(|obj| match obj {
+                oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
+                _ => None,
+            })
+            .map(|s| s.to_string()),
+        target: activity
+            .target
+            .as_ref()
+            .and_then(|target| match target {
+                oxifed::ObjectOrLink::Url(url) => Some(url.as_str()),
+                _ => None,
+            })
+            .map(|s| s.to_string()),
+        name: activity.name.clone(),
+        summary: activity.summary.clone(),
+        published: activity.published,
+        updated: None,
+        to: Some(Vec::new()), // TODO: Extract from additional_properties
+        cc: Some(Vec::new()), // TODO: Extract from additional_properties
+        bto: None,
+        bcc: None,
+        additional_properties: None,
+        local: false,
+        status: ActivityStatus::Pending,
+        created_at: Utc::now(),
+        attempts: 0,
+        last_attempt: None,
+        error: None,
+    };
+
+    state
+        .db_manager
+        .insert_activity(activity_doc)
+        .await
+        .map_err(|e| format!("Failed to store activity: {}", e))?;
+
+    Ok(())
+}
+
+/// Store activity in database (from JSON Value - legacy)
 async fn store_activity(activity: &Value, state: &AppState) -> Result<(), String> {
     let activity_doc = ActivityDocument {
         id: None,
@@ -1293,7 +1391,17 @@ async fn store_article_object(object: &Value, state: &AppState) -> Result<(), St
     Ok(())
 }
 
-/// Publish activity to message queue for delivery
+/// Publish activity to message queue for delivery (from Activity struct)
+async fn publish_activity_message_struct(activity: &Activity, _state: &AppState) -> Result<(), String> {
+    // TODO: Implement message queue publishing
+    debug!(
+        "Publishing activity to message queue: {:?}",
+        activity.activity_type
+    );
+    Ok(())
+}
+
+/// Publish activity to message queue for delivery (legacy JSON version)
 async fn publish_activity_message(activity: &Value, _state: &AppState) -> Result<(), String> {
     // TODO: Implement message queue publishing
     debug!(
