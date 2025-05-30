@@ -24,6 +24,12 @@ pub struct AppState {
     pub db: Arc<MongoDB>,
     /// LavinMQ connection pool
     pub mq_pool: deadpool_lapin::Pool,
+    /// Database manager for ActivityPub operations
+    pub db_manager: Arc<DatabaseManager>,
+    /// PKI manager for cryptographic operations
+    pub pki_manager: Arc<PkiManager>,
+    /// Domain name for this instance
+    pub domain: String,
 }
 
 /// Errors that can occur in the domainservd service
@@ -89,15 +95,6 @@ async fn main() -> Result<(), DomainservdError> {
     rabbitmq::init_rabbitmq(&mq_pool).await?;
     tracing::info!("LavinMQ initialized successfully");
 
-    // Create an application state
-    let app_state = AppState {
-        db: db.clone(),
-        mq_pool: mq_pool.clone(),
-    };
-
-    // Start message consumer in a separate task
-    rabbitmq::start_consumers(mq_pool, db.clone()).await?;
-
     // Create database manager
     let db_manager = Arc::new(DatabaseManager::new(db.database().clone()));
     db_manager.initialize().await?;
@@ -105,9 +102,27 @@ async fn main() -> Result<(), DomainservdError> {
     // Create PKI manager (in a real implementation, this would load existing keys)
     let pki_manager = Arc::new(PkiManager::new());
 
+    // Get domain from environment or use default
+    let domain = std::env::var("DOMAIN").unwrap_or_else(|_| "localhost:3000".to_string());
+
+    // Create an application state
+    let app_state = AppState {
+        db: db.clone(),
+        mq_pool: mq_pool.clone(),
+        db_manager: db_manager.clone(),
+        pki_manager: pki_manager.clone(),
+        domain,
+    };
+
+    // Start message consumer in a separate task
+    rabbitmq::start_consumers(mq_pool, db.clone()).await?;
+
+
+
     let app = Router::new()
         .route("/health", get(health_check))
         .merge(webfinger::webfinger_router(app_state.clone()))
+        .merge(activitypub::activitypub_router(app_state.clone()))
         .with_state(app_state);
 
     let addr = "0.0.0.0:3000";

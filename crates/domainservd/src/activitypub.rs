@@ -14,25 +14,18 @@ use chrono::{DateTime, Utc};
 use oxifed::{
     ActivityType, ObjectType,
     database::{
-        ActivityDocument, ActivityStatus, ActorDocument, ActorStatus, DatabaseManager,
+        ActivityDocument, ActivityStatus, ActorDocument, ActorStatus,
         FollowDocument, FollowStatus, ObjectDocument, VisibilityLevel,
     },
-    pki::PkiManager,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-/// Application state for ActivityPub handlers
-#[derive(Clone)]
-pub struct ActivityPubState {
-    pub db: Arc<DatabaseManager>,
-    pub pki: Arc<PkiManager>,
-    pub mq_pool: deadpool_lapin::Pool,
-    pub domain: String,
-}
+use crate::AppState;
+
+// ActivityPubState is no longer needed - using AppState instead
 
 /// Query parameters for collections
 #[derive(Debug, Deserialize)]
@@ -70,7 +63,7 @@ pub struct ActivityPubCollection {
 }
 
 /// Create ActivityPub router
-pub fn activitypub_router(state: ActivityPubState) -> Router<ActivityPubState> {
+pub fn activitypub_router(_state: AppState) -> Router<AppState> {
     Router::new()
         // Actor endpoints
         .route("/users/:username", get(get_actor))
@@ -87,20 +80,19 @@ pub fn activitypub_router(state: ActivityPubState) -> Router<ActivityPubState> {
         .route("/inbox", post(post_shared_inbox))
         // Node info
         .route("/nodeinfo/2.0", get(get_nodeinfo))
-        .with_state(state)
 }
 
 /// Get actor profile
 async fn get_actor(
     Path(username): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
     _headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting actor profile for username: {}", username);
 
     // Find actor in database
     let actor_doc = match state
-        .db
+        .db_manager
         .find_actor_by_username(&username, &state.domain)
         .await
     {
@@ -178,7 +170,7 @@ async fn get_actor(
 /// Handle incoming activities to user inbox
 async fn post_inbox(
     Path(username): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
     headers: HeaderMap,
     Json(activity): Json<Value>,
 ) -> Result<Response, StatusCode> {
@@ -195,8 +187,9 @@ async fn post_inbox(
     }
 
     // Verify actor exists and is active
+    // Find actor in database
     let actor_doc = match state
-        .db
+        .db_manager
         .find_actor_by_username(&username, &state.domain)
         .await
     {
@@ -221,7 +214,7 @@ async fn post_inbox(
 
 /// Handle shared inbox for server-level activities
 async fn post_shared_inbox(
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
     headers: HeaderMap,
     Json(activity): Json<Value>,
 ) -> Result<Response, StatusCode> {
@@ -251,14 +244,14 @@ async fn post_shared_inbox(
 async fn get_outbox(
     Path(username): Path<String>,
     Query(params): Query<CollectionQuery>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
     _headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting outbox for user: {}", username);
 
     // Find actor
     let actor_doc = match state
-        .db
+        .db_manager
         .find_actor_by_username(&username, &state.domain)
         .await
     {
@@ -334,12 +327,11 @@ async fn get_outbox(
 
 /// Post to actor's outbox (C2S)
 async fn post_outbox(
-    Path(_username): Path<String>,
-    State(_state): State<ActivityPubState>,
-    _headers: HeaderMap,
+    Path(username): Path<String>,
+    State(_state): State<AppState>,
     Json(_activity): Json<Value>,
 ) -> Result<Response, StatusCode> {
-    info!("Posting to outbox for user: {}", _username);
+    info!("Posting to outbox for user: {}", username);
 
     // TODO: Implement authentication for C2S
     // For now, reject all C2S posts
@@ -349,13 +341,13 @@ async fn post_outbox(
 /// Get actor's followers
 async fn get_followers(
     Path(username): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
     _headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting followers for user: {}", username);
 
     let actor_doc = match state
-        .db
+        .db_manager
         .find_actor_by_username(&username, &state.domain)
         .await
     {
@@ -368,7 +360,7 @@ async fn get_followers(
         return Err(StatusCode::GONE);
     }
 
-    let followers = match state.db.get_actor_followers(&actor_doc.actor_id).await {
+    let followers = match state.db_manager.get_actor_followers(&actor_doc.actor_id).await {
         Ok(followers) => followers,
         Err(e) => {
             error!("Failed to get followers: {}", e);
@@ -401,13 +393,13 @@ async fn get_followers(
 /// Get actor's following
 async fn get_following(
     Path(username): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
     _headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting following for user: {}", username);
 
     let actor_doc = match state
-        .db
+        .db_manager
         .find_actor_by_username(&username, &state.domain)
         .await
     {
@@ -420,7 +412,7 @@ async fn get_following(
         return Err(StatusCode::GONE);
     }
 
-    let following = match state.db.get_actor_following(&actor_doc.actor_id).await {
+    let following = match state.db_manager.get_actor_following(&actor_doc.actor_id).await {
         Ok(following) => following,
         Err(e) => {
             error!("Failed to get following: {}", e);
@@ -453,7 +445,7 @@ async fn get_following(
 /// Get actor's liked collection
 async fn get_liked(
     Path(_username): Path<String>,
-    State(_state): State<ActivityPubState>,
+    State(_state): State<AppState>,
 ) -> Result<Response, StatusCode> {
     // Liked collections are typically private
     Err(StatusCode::FORBIDDEN)
@@ -462,12 +454,12 @@ async fn get_liked(
 /// Get actor's featured collection
 async fn get_featured(
     Path(username): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
 ) -> Result<Response, StatusCode> {
     debug!("Getting featured posts for user: {}", username);
 
     let actor_doc = match state
-        .db
+        .db_manager
         .find_actor_by_username(&username, &state.domain)
         .await
     {
@@ -508,13 +500,13 @@ async fn get_featured(
 /// Get individual object
 async fn get_object(
     Path(id): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
 ) -> Result<Response, StatusCode> {
     debug!("Getting object: {}", id);
 
     let object_id = format!("https://{}/objects/{}", state.domain, id);
 
-    let object_doc = match state.db.find_object_by_id(&object_id).await {
+    let object_doc = match state.db_manager.find_object_by_id(&object_id).await {
         Ok(Some(obj)) => obj,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
         Err(e) => {
@@ -551,13 +543,13 @@ async fn get_object(
 /// Get individual activity
 async fn get_activity(
     Path(id): Path<String>,
-    State(state): State<ActivityPubState>,
+    State(state): State<AppState>,
 ) -> Result<Response, StatusCode> {
     debug!("Getting activity: {}", id);
 
     let activity_id = format!("https://{}/activities/{}", state.domain, id);
 
-    let activity_doc = match state.db.find_activity_by_id(&activity_id).await {
+    let activity_doc = match state.db_manager.find_activity_by_id(&activity_id).await {
         Ok(Some(activity)) => activity,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
         Err(e) => {
@@ -587,7 +579,7 @@ async fn get_activity(
 }
 
 /// Get node info
-async fn get_nodeinfo(State(state): State<ActivityPubState>) -> Result<Response, StatusCode> {
+async fn get_nodeinfo(State(state): State<AppState>) -> Result<Response, StatusCode> {
     let nodeinfo = json!({
         "version": "2.0",
         "software": {
@@ -621,7 +613,7 @@ async fn get_nodeinfo(State(state): State<ActivityPubState>) -> Result<Response,
 /// Verify HTTP signature
 async fn verify_http_signature(
     _headers: &HeaderMap,
-    _state: &ActivityPubState,
+    _state: &AppState,
 ) -> Result<(), String> {
     // TODO: Implement proper HTTP signature verification using PKI
     debug!("HTTP signature verification - placeholder implementation");
@@ -632,7 +624,7 @@ async fn verify_http_signature(
 async fn process_incoming_activity(
     activity: &Value,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     let activity_type = activity
         .get("type")
@@ -662,7 +654,7 @@ async fn process_incoming_activity(
 /// Process shared inbox activity
 async fn process_shared_inbox_activity(
     activity: &Value,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     let activity_type = activity
         .get("type")
@@ -685,7 +677,7 @@ async fn process_shared_inbox_activity(
 async fn handle_follow_activity(
     activity: &Value,
     target_actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     let follower = activity
         .get("actor")
@@ -714,7 +706,7 @@ async fn handle_follow_activity(
     };
 
     state
-        .db
+        .db_manager
         .insert_follow(follow_doc)
         .await
         .map_err(|e| format!("Failed to store follow: {}", e))?;
@@ -734,7 +726,7 @@ async fn handle_follow_activity(
 
     // Update follow status
     state
-        .db
+        .db_manager
         .update_follow_status(follower, &target_actor.actor_id, FollowStatus::Accepted)
         .await
         .map_err(|e| format!("Failed to update follow status: {}", e))?;
@@ -746,7 +738,7 @@ async fn handle_follow_activity(
 async fn handle_undo_activity(
     activity: &Value,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     let object = activity.get("object").ok_or("Missing undo object")?;
 
@@ -764,7 +756,7 @@ async fn handle_undo_activity(
                 );
 
                 state
-                    .db
+                    .db_manager
                     .update_follow_status(&actor.actor_id, following, FollowStatus::Cancelled)
                     .await
                     .map_err(|e| format!("Failed to update follow status: {}", e))?;
@@ -782,7 +774,7 @@ async fn handle_undo_activity(
 async fn handle_create_activity(
     activity: &Value,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     let object = activity.get("object").ok_or("Missing create object")?;
 
@@ -809,7 +801,7 @@ async fn handle_create_activity(
 async fn handle_update_activity(
     activity: &Value,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     info!("Processing update activity from {}", actor.actor_id);
     store_activity(activity, state).await
@@ -819,7 +811,7 @@ async fn handle_update_activity(
 async fn handle_delete_activity(
     activity: &Value,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     info!("Processing delete activity from {}", actor.actor_id);
     store_activity(activity, state).await
@@ -829,7 +821,7 @@ async fn handle_delete_activity(
 async fn handle_like_activity(
     activity: &Value,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     info!("Processing like activity from {}", actor.actor_id);
     store_activity(activity, state).await
@@ -839,14 +831,14 @@ async fn handle_like_activity(
 async fn handle_announce_activity(
     activity: &Value,
     actor: &ActorDocument,
-    state: &ActivityPubState,
+    state: &AppState,
 ) -> Result<(), String> {
     info!("Processing announce activity from {}", actor.actor_id);
     store_activity(activity, state).await
 }
 
 /// Store activity in database
-async fn store_activity(activity: &Value, state: &ActivityPubState) -> Result<(), String> {
+async fn store_activity(activity: &Value, state: &AppState) -> Result<(), String> {
     let activity_doc = ActivityDocument {
         id: None,
         activity_id: activity
@@ -896,7 +888,7 @@ async fn store_activity(activity: &Value, state: &ActivityPubState) -> Result<()
     };
 
     state
-        .db
+        .db_manager
         .insert_activity(activity_doc)
         .await
         .map_err(|e| format!("Failed to store activity: {}", e))?;
@@ -905,7 +897,7 @@ async fn store_activity(activity: &Value, state: &ActivityPubState) -> Result<()
 }
 
 /// Store note object in database
-async fn store_note_object(object: &Value, state: &ActivityPubState) -> Result<(), String> {
+async fn store_note_object(object: &Value, state: &AppState) -> Result<(), String> {
     let object_doc = ObjectDocument {
         id: None,
         object_id: object
@@ -976,7 +968,7 @@ async fn store_note_object(object: &Value, state: &ActivityPubState) -> Result<(
     };
 
     state
-        .db
+        .db_manager
         .insert_object(object_doc)
         .await
         .map_err(|e| format!("Failed to store note object: {}", e))?;
@@ -985,7 +977,7 @@ async fn store_note_object(object: &Value, state: &ActivityPubState) -> Result<(
 }
 
 /// Store article object in database
-async fn store_article_object(object: &Value, state: &ActivityPubState) -> Result<(), String> {
+async fn store_article_object(object: &Value, state: &AppState) -> Result<(), String> {
     let object_doc = ObjectDocument {
         id: None,
         object_id: object
@@ -1056,7 +1048,7 @@ async fn store_article_object(object: &Value, state: &ActivityPubState) -> Resul
     };
 
     state
-        .db
+        .db_manager
         .insert_object(object_doc)
         .await
         .map_err(|e| format!("Failed to store article object: {}", e))?;
@@ -1067,7 +1059,7 @@ async fn store_article_object(object: &Value, state: &ActivityPubState) -> Resul
 /// Publish activity to message queue for delivery
 async fn publish_activity_message(
     activity: &Value,
-    _state: &ActivityPubState,
+    _state: &AppState,
 ) -> Result<(), String> {
     // TODO: Implement message queue publishing
     debug!(
