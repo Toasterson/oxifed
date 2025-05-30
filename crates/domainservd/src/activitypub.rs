@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::AppState;
+use crate::{AppState, extract_domain_from_headers};
 
 // ActivityPubState is no longer needed - using AppState instead
 
@@ -86,19 +86,28 @@ pub fn activitypub_router(_state: AppState) -> Router<AppState> {
 async fn get_actor(
     Path(username): Path<String>,
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting actor profile for username: {}", username);
+
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
 
     // Find actor in database
     let actor_doc = match state
         .db_manager
-        .find_actor_by_username(&username, &state.domain)
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
         Ok(None) => {
-            warn!("Actor not found: {}@{}", username, state.domain);
+            warn!("Actor not found: {}@{}", username, domain);
             return Err(StatusCode::NOT_FOUND);
         }
         Err(e) => {
@@ -109,7 +118,7 @@ async fn get_actor(
 
     // Check if actor is active
     if actor_doc.status != ActorStatus::Active {
-        warn!("Actor not active: {}@{}", username, state.domain);
+        warn!("Actor not active: {}@{}", username, domain);
         return Err(StatusCode::GONE);
     }
 
@@ -186,11 +195,20 @@ async fn post_inbox(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     // Verify actor exists and is active
     // Find actor in database
     let actor_doc = match state
         .db_manager
-        .find_actor_by_username(&username, &state.domain)
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
@@ -245,14 +263,23 @@ async fn get_outbox(
     Path(username): Path<String>,
     Query(params): Query<CollectionQuery>,
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting outbox for user: {}", username);
+
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
 
     // Find actor
     let actor_doc = match state
         .db_manager
-        .find_actor_by_username(&username, &state.domain)
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
@@ -342,13 +369,22 @@ async fn post_outbox(
 async fn get_followers(
     Path(username): Path<String>,
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting followers for user: {}", username);
 
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     let actor_doc = match state
         .db_manager
-        .find_actor_by_username(&username, &state.domain)
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
@@ -398,13 +434,22 @@ async fn get_followers(
 async fn get_following(
     Path(username): Path<String>,
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting following for user: {}", username);
 
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     let actor_doc = match state
         .db_manager
-        .find_actor_by_username(&username, &state.domain)
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
@@ -463,12 +508,22 @@ async fn get_liked(
 async fn get_featured(
     Path(username): Path<String>,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting featured posts for user: {}", username);
 
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     let actor_doc = match state
         .db_manager
-        .find_actor_by_username(&username, &state.domain)
+        .find_actor_by_username(&username, &domain)
         .await
     {
         Ok(Some(actor)) => actor,
@@ -509,10 +564,20 @@ async fn get_featured(
 async fn get_object(
     Path(id): Path<String>,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting object: {}", id);
 
-    let object_id = format!("https://{}/objects/{}", state.domain, id);
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    let object_id = format!("https://{}/objects/{}", domain, id);
 
     let object_doc = match state.db_manager.find_object_by_id(&object_id).await {
         Ok(Some(obj)) => obj,
@@ -552,10 +617,20 @@ async fn get_object(
 async fn get_activity(
     Path(id): Path<String>,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     debug!("Getting activity: {}", id);
 
-    let activity_id = format!("https://{}/activities/{}", state.domain, id);
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    let activity_id = format!("https://{}/activities/{}", domain, id);
 
     let activity_doc = match state.db_manager.find_activity_by_id(&activity_id).await {
         Ok(Some(activity)) => activity,
@@ -587,7 +662,19 @@ async fn get_activity(
 }
 
 /// Get node info
-async fn get_nodeinfo(State(state): State<AppState>) -> Result<Response, StatusCode> {
+async fn get_nodeinfo(
+    State(_state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    // Extract domain from Host header
+    let domain = match extract_domain_from_headers(&headers) {
+        Some(d) => d,
+        None => {
+            error!("Missing or invalid Host header");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
     let nodeinfo = json!({
         "version": "2.0",
         "software": {
@@ -605,7 +692,7 @@ async fn get_nodeinfo(State(state): State<AppState>) -> Result<Response, StatusC
         },
         "openRegistrations": false,
         "metadata": {
-            "nodeName": state.domain,
+            "nodeName": domain,
             "nodeDescription": "Oxifed ActivityPub server"
         }
     });

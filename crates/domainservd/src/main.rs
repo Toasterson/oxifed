@@ -9,7 +9,7 @@ mod delivery;
 mod rabbitmq;
 mod webfinger;
 
-use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{Router, http::{StatusCode, HeaderMap}, response::IntoResponse, routing::get};
 use db::MongoDB;
 use oxifed::database::DatabaseManager;
 use oxifed::pki::PkiManager;
@@ -28,8 +28,6 @@ pub struct AppState {
     pub db_manager: Arc<DatabaseManager>,
     /// PKI manager for cryptographic operations
     pub pki_manager: Arc<PkiManager>,
-    /// Domain name for this instance
-    pub domain: String,
 }
 
 /// Errors that can occur in the domainservd service
@@ -58,6 +56,17 @@ pub enum DomainservdError {
     /// External database error
     #[error("External database error: {0}")]
     DatabaseError(#[from] oxifed::database::DatabaseError),
+}
+
+/// Extract domain from Host header
+pub fn extract_domain_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("host")
+        .and_then(|host| host.to_str().ok())
+        .map(|host| {
+            // Remove port if present
+            host.split(':').next().unwrap_or(host).to_string()
+        })
 }
 
 async fn health_check() -> impl IntoResponse {
@@ -102,16 +111,12 @@ async fn main() -> Result<(), DomainservdError> {
     // Create PKI manager (in a real implementation, this would load existing keys)
     let pki_manager = Arc::new(PkiManager::new());
 
-    // Get domain from environment or use default
-    let domain = std::env::var("DOMAIN").unwrap_or_else(|_| "localhost:3000".to_string());
-
     // Create an application state
     let app_state = AppState {
         db: db.clone(),
         mq_pool: mq_pool.clone(),
         db_manager: db_manager.clone(),
         pki_manager: pki_manager.clone(),
-        domain,
     };
 
     // Start message consumer in a separate task
