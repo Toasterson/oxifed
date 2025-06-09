@@ -21,7 +21,7 @@ use oxifed::messaging::{
     NoteUpdateMessage, ProfileCreateMessage, ProfileDeleteMessage, ProfileUpdateMessage,
     RejectActivityMessage,
 };
-use oxifed::pki::{KeyAlgorithm, PkiManager};
+use oxifed::pki::{KeyAlgorithm, PkiManager, TrustLevel};
 use oxifed::messaging::{
     EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INCOMING_PROCESS, EXCHANGE_INTERNAL_PUBLISH,
     EXCHANGE_RPC_REQUEST, EXCHANGE_RPC_RESPONSE, QUEUE_RPC_DOMAIN,
@@ -506,8 +506,66 @@ async fn handle_key_generate(db: &Arc<MongoDB>, msg: &KeyGenerateMessage) -> Res
                 "Key generated successfully for actor: {}, key ID: {}",
                 msg.actor, user_key.key_id
             );
-            // In a real implementation, we would store the key in the database
-            Ok(())
+
+            // Create KeyDocument from UserKeyInfo
+            let key_document = oxifed::database::KeyDocument {
+                id: None,
+                key_id: user_key.key_id.clone(),
+                actor_id: user_key.actor_id.clone(),
+                key_type: oxifed::database::KeyType::User,
+                algorithm: format!("{:?}", user_key.public_key.algorithm).to_lowercase(),
+                key_size: match user_key.public_key.algorithm {
+                    KeyAlgorithm::Rsa { key_size } => Some(key_size),
+                    _ => None,
+                },
+                public_key_pem: user_key.public_key.pem_data.clone(),
+                private_key_pem: user_key.private_key.as_ref().map(|pk| pk.encrypted_pem.clone()),
+                encryption_algorithm: user_key.private_key.as_ref().map(|pk| pk.encryption_algorithm.clone()),
+                fingerprint: user_key.public_key.fingerprint.clone(),
+                trust_level: user_key.trust_level,
+                domain_signature: user_key.domain_signature.map(|ds| {
+                    let mut doc = mongodb::bson::Document::new();
+                    doc.insert("domain", ds.domain);
+                    doc.insert("signature", ds.signature);
+                    let system_time: SystemTime = ds.signed_at.into();
+                    doc.insert("signed_at", mongodb::bson::Bson::DateTime(system_time.into()));
+                    doc.insert("domain_key_id", ds.domain_key_id);
+                    doc.insert("verification_chain", ds.verification_chain);
+                    doc
+                }),
+                master_signature: None,
+                usage: vec!["signing".to_string()],
+                status: oxifed::database::KeyStatus::Active,
+                created_at: user_key.created_at,
+                expires_at: user_key.expires_at,
+                rotation_policy: {
+                    let mut doc = mongodb::bson::Document::new();
+                    doc.insert("automatic", user_key.rotation_policy.automatic);
+                    if let Some(interval) = user_key.rotation_policy.rotation_interval {
+                        doc.insert("rotation_interval", interval.num_seconds());
+                    }
+                    if let Some(max_age) = user_key.rotation_policy.max_age {
+                        doc.insert("max_age", max_age.num_seconds());
+                    }
+                    if let Some(notify_before) = user_key.rotation_policy.notify_before {
+                        doc.insert("notify_before", notify_before.num_seconds());
+                    }
+                    Some(doc)
+                },
+                domain: None,
+            };
+
+            // Save key to database
+            match db.manager().insert_key(key_document).await {
+                Ok(key_id) => {
+                    info!("Key saved to database with ID: {}", key_id);
+                    Ok(())
+                }
+                Err(e) => {
+                    error!("Failed to save key to database: {}", e);
+                    Err(RabbitMQError::DatabaseError(e))
+                }
+            }
         }
         Err(e) => {
             error!("Failed to generate key: {}", e);
