@@ -43,6 +43,7 @@ pub enum MessageEnum {
     DomainRpcResponse(DomainRpcResponse),
     IncomingObjectMessage(IncomingObjectMessage),
     IncomingActivityMessage(IncomingActivityMessage),
+    KeyGenerateMessage(KeyGenerateMessage),
 }
 
 /// Message format for profile creation requests
@@ -683,5 +684,30 @@ pub struct IncomingActivityMessage {
 impl Message for IncomingActivityMessage {
     fn to_message(&self) -> MessageEnum {
         MessageEnum::IncomingActivityMessage(self.clone())
+    }
+}
+
+/// Message for key generation requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyGenerateMessage {
+    pub actor: String,
+    pub algorithm: String,
+    pub key_size: Option<u32>,
+}
+
+impl KeyGenerateMessage {
+    /// Create a new key generation message
+    pub fn new(actor: String, algorithm: String, key_size: Option<u32>) -> Self {
+        Self {
+            actor,
+            algorithm,
+            key_size,
+        }
+    }
+}
+
+impl Message for KeyGenerateMessage {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::KeyGenerateMessage(self.clone())
     }
 }

@@ -184,6 +184,34 @@ impl KeyPair {
         })
     }
 
+    /// Generate a new key pair
+    pub fn generate(algorithm: KeyAlgorithm) -> Result<Self, PkiError> {
+        match algorithm {
+            KeyAlgorithm::Rsa { key_size } => Self::generate_rsa(key_size),
+            KeyAlgorithm::Ed25519 => Self::generate_ed25519(),
+        }
+    }
+
+    /// Generate an RSA key pair
+    fn generate_rsa(key_size: u32) -> Result<Self, PkiError> {
+        // In a real implementation, this would use actual RSA key generation
+        // For now, create mock PEM strings that indicate the algorithm and key size
+        let public_pem = format!("-----BEGIN PUBLIC KEY-----\nMOCK_RSA_PUBLIC_KEY_{}\n-----END PUBLIC KEY-----", key_size);
+        let private_pem = format!("-----BEGIN PRIVATE KEY-----\nMOCK_RSA_PRIVATE_KEY_{}\n-----END PRIVATE KEY-----", key_size);
+
+        Self::from_pem(KeyAlgorithm::Rsa { key_size }, public_pem, private_pem)
+    }
+
+    /// Generate an Ed25519 key pair
+    fn generate_ed25519() -> Result<Self, PkiError> {
+        // In a real implementation, this would use actual Ed25519 key generation
+        // For now, create mock PEM strings that indicate the algorithm
+        let public_pem = "-----BEGIN PUBLIC KEY-----\nMOCK_ED25519_PUBLIC_KEY\n-----END PUBLIC KEY-----".to_string();
+        let private_pem = "-----BEGIN PRIVATE KEY-----\nMOCK_ED25519_PRIVATE_KEY\n-----END PRIVATE KEY-----".to_string();
+
+        Self::from_pem(KeyAlgorithm::Ed25519, public_pem, private_pem)
+    }
+
     /// Sign data with the private key (simplified version)
     pub fn sign(&self, data: &[u8]) -> Result<String, PkiError> {
         // For now, return a mock signature
@@ -356,6 +384,23 @@ impl PkiManager {
             user_keys: HashMap::new(),
             instance_keys: HashMap::new(),
         }
+    }
+
+    /// Generate a new key pair for a user
+    pub fn generate_user_key(
+        &mut self,
+        actor_id: String,
+        algorithm: KeyAlgorithm,
+    ) -> Result<UserKeyInfo, PkiError> {
+        // Generate a new key pair
+        let key_pair = KeyPair::generate(algorithm)
+            .map_err(|e| PkiError::KeyGenerationError(format!("Failed to generate key pair: {}", e)))?;
+
+        // Create a new user key with the generated key pair
+        let user_key = UserKeyInfo::new_unverified(actor_id.clone(), key_pair);
+        self.user_keys.insert(actor_id, user_key.clone());
+
+        Ok(user_key)
     }
 
     /// Import user key (BYOK - Bring Your Own Key)

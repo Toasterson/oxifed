@@ -3,6 +3,7 @@ mod messaging;
 use clap::{Parser, Subcommand};
 use messaging::LavinMQClient;
 use miette::{Context, IntoDiagnostic, Result};
+use oxifed::messaging::KeyGenerateMessage;
 
 /// Oxifed Admin CLI tool for managing profiles
 #[derive(Parser)]
@@ -611,6 +612,15 @@ async fn handle_key_command_messaging(client: &LavinMQClient, command: &KeyComma
             if let Some(size) = key_size {
                 println!("Key size: {}", size);
             }
+
+            // Create and send key generation message
+            let key_gen_message = KeyGenerateMessage::new(
+                actor.clone(),
+                algorithm.clone(),
+                key_size.clone(),
+            );
+
+            client.publish_message(&key_gen_message).await?;
             println!("Key generation request sent to PKI service");
         }
 

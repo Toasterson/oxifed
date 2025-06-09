@@ -17,10 +17,11 @@ use mongodb::bson::Bson;
 use oxifed::messaging::{
     AcceptActivityMessage, AnnounceActivityMessage, DomainCreateMessage, DomainDeleteMessage,
     DomainInfo, DomainRpcRequest, DomainRpcResponse, DomainUpdateMessage, FollowActivityMessage,
-    LikeActivityMessage, Message, MessageEnum, NoteCreateMessage, NoteDeleteMessage,
+    KeyGenerateMessage, LikeActivityMessage, Message, MessageEnum, NoteCreateMessage, NoteDeleteMessage,
     NoteUpdateMessage, ProfileCreateMessage, ProfileDeleteMessage, ProfileUpdateMessage,
     RejectActivityMessage,
 };
+use oxifed::pki::{KeyAlgorithm, PkiManager};
 use oxifed::messaging::{
     EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INCOMING_PROCESS, EXCHANGE_INTERNAL_PUBLISH,
     EXCHANGE_RPC_REQUEST, EXCHANGE_RPC_RESPONSE, QUEUE_RPC_DOMAIN,
@@ -449,6 +450,7 @@ async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQE
         MessageEnum::DomainCreateMessage(msg) => create_domain_object(db, &msg).await,
         MessageEnum::DomainUpdateMessage(msg) => update_domain_object(db, &msg).await,
         MessageEnum::DomainDeleteMessage(msg) => delete_domain_object(db, &msg).await,
+        MessageEnum::KeyGenerateMessage(msg) => handle_key_generate(db, &msg).await,
         MessageEnum::DomainRpcRequest(_) | MessageEnum::DomainRpcResponse(_) => {
             warn!("RPC messages should not be processed by this handler");
             Ok(())
@@ -466,6 +468,53 @@ async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQE
                 "IncomingActivityMessage should not be processed by domainservd - it should be handled by dedicated processing daemons"
             );
             Ok(())
+        }
+    }
+}
+
+/// Handle key generation request
+async fn handle_key_generate(db: &Arc<MongoDB>, msg: &KeyGenerateMessage) -> Result<(), RabbitMQError> {
+    info!("Generating key for actor: {}", msg.actor);
+
+    // Create PKI manager
+    let mut pki_manager = PkiManager::new();
+
+    // Parse algorithm
+    let algorithm = match msg.algorithm.to_lowercase().as_str() {
+        "rsa" => {
+            let key_size = msg.key_size.unwrap_or(2048);
+            info!("Using RSA algorithm with key size: {}", key_size);
+            KeyAlgorithm::Rsa { key_size }
+        }
+        "ed25519" => {
+            info!("Using Ed25519 algorithm");
+            KeyAlgorithm::Ed25519
+        }
+        _ => {
+            error!("Unsupported algorithm: {}", msg.algorithm);
+            return Err(RabbitMQError::ConstraintError(format!(
+                "Unsupported algorithm: {}",
+                msg.algorithm
+            )));
+        }
+    };
+
+    // Generate key
+    match pki_manager.generate_user_key(msg.actor.clone(), algorithm) {
+        Ok(user_key) => {
+            info!(
+                "Key generated successfully for actor: {}, key ID: {}",
+                msg.actor, user_key.key_id
+            );
+            // In a real implementation, we would store the key in the database
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to generate key: {}", e);
+            Err(RabbitMQError::ConstraintError(format!(
+                "Failed to generate key: {}",
+                e
+            )))
         }
     }
 }
