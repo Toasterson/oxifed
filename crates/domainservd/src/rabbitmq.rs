@@ -1625,6 +1625,40 @@ async fn create_person_object(
         format!("https://{}/sharedInbox", &domain),
     );
 
+    // Generate a key for the actor
+    let mut pki_manager = PkiManager::new();
+    let public_key_doc = match pki_manager.generate_user_key(actor_id.clone(), KeyAlgorithm::Ed25519) {
+        Ok(user_key) => {
+            info!(
+                "Key generated successfully for actor: {}, key ID: {}",
+                actor_id, user_key.key_id
+            );
+
+            // Convert to PublicKeyDocument
+            Some(oxifed::database::PublicKeyDocument {
+                id: user_key.key_id.clone(),
+                owner: actor_id.clone(),
+                public_key_pem: user_key.public_key.pem_data.clone(),
+                algorithm: match user_key.public_key.algorithm {
+                    KeyAlgorithm::Rsa { key_size } => {
+                        format!("rsa-{}", key_size)
+                    },
+                    KeyAlgorithm::Ed25519 => "ed25519".to_string(),
+                },
+                key_size: match user_key.public_key.algorithm {
+                    KeyAlgorithm::Rsa { key_size } => Some(key_size),
+                    KeyAlgorithm::Ed25519 => None,
+                },
+                fingerprint: user_key.public_key.fingerprint.clone(),
+                created_at: now,
+            })
+        },
+        Err(e) => {
+            error!("Failed to generate key for actor {}: {}", actor_id, e);
+            None
+        }
+    };
+
     // Create the actor document using unified database schema
     let actor_doc = oxifed::database::ActorDocument {
         id: None,
@@ -1642,7 +1676,7 @@ async fn create_person_object(
         followers: format!("https://{}/users/{}/followers", &domain, &username),
         liked: Some(format!("https://{}/users/{}/liked", &domain, &username)),
         featured: Some(format!("https://{}/users/{}/featured", &domain, &username)),
-        public_key: None, // TODO: Generate public key
+        public_key: public_key_doc,
         endpoints: Some(mongodb::bson::to_document(&endpoints).unwrap_or_default()),
         attachment: None,
         additional_properties: message
