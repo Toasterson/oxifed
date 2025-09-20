@@ -614,11 +614,8 @@ async fn handle_key_command_messaging(client: &LavinMQClient, command: &KeyComma
             }
 
             // Create and send key generation message
-            let key_gen_message = KeyGenerateMessage::new(
-                actor.clone(),
-                algorithm.clone(),
-                key_size.clone(),
-            );
+            let key_gen_message =
+                KeyGenerateMessage::new(actor.clone(), algorithm.clone(), key_size.clone());
 
             client.publish_message(&key_gen_message).await?;
             println!("Key generation request sent to PKI service");
@@ -684,7 +681,10 @@ async fn handle_key_command_messaging(client: &LavinMQClient, command: &KeyComma
 }
 
 /// Handle PKI commands via messaging
-async fn handle_pki_command_messaging(client: &LavinMQClient, command: &PkiCommands) -> Result<()> {
+async fn handle_pki_command_messaging(
+    _client: &LavinMQClient,
+    command: &PkiCommands,
+) -> Result<()> {
     match command {
         PkiCommands::InitMaster { key_size, output } => {
             println!("Initializing master key with size {} bits", key_size);
@@ -746,7 +746,7 @@ async fn handle_pki_command_messaging(client: &LavinMQClient, command: &PkiComma
 
 /// Handle System commands via messaging
 async fn handle_system_command_messaging(
-    client: &LavinMQClient,
+    _client: &LavinMQClient,
     command: &SystemCommands,
 ) -> Result<()> {
     match command {
@@ -800,7 +800,7 @@ async fn handle_system_command_messaging(
 
 /// Handle Test commands via messaging
 async fn handle_test_command_messaging(
-    client: &LavinMQClient,
+    _client: &LavinMQClient,
     command: &TestCommands,
 ) -> Result<()> {
     match command {

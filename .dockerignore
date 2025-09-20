@@ -1,6 +1,5 @@
 # Build artifacts
 target/
-Cargo.lock
 
 # Git
 .git/
@@ -26,7 +25,6 @@ HTTP_SIGNATURES.md
 LICENSE
 
 # Test data
-test-data/
 sample-*.json
 
 # Scripts

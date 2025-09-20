@@ -7,11 +7,10 @@
 //! - Content federation
 
 use oxifed::messaging::{
-    DomainCreateMessage, DomainInfo,
-    FollowActivityMessage, IncomingActivityMessage, IncomingObjectMessage, Message,
-    MessageEnum, NoteCreateMessage, ProfileCreateMessage
+    DomainCreateMessage, DomainInfo, FollowActivityMessage, IncomingActivityMessage,
+    IncomingObjectMessage, Message, MessageEnum, NoteCreateMessage, ProfileCreateMessage,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -19,8 +18,11 @@ use uuid::Uuid;
 struct ServerConfig {
     name: String,
     domain: String,
+    #[allow(dead_code)]
     port: u16,
+    #[allow(dead_code)]
     rabbitmq_port: u16,
+    #[allow(dead_code)]
     mongodb_port: u16,
 }
 
@@ -44,7 +46,7 @@ impl ServerInstance {
     /// Initialize the server with a domain
     async fn initialize(&self) {
         // Create a domain for this server
-        let domain_msg = DomainCreateMessage::new(
+        let _domain_msg = DomainCreateMessage::new(
             self.config.domain.clone(),
             Some(format!("{} Server", self.config.name)),
             Some(format!("Test server for {}", self.config.name)),
@@ -77,7 +79,10 @@ impl ServerInstance {
         // Store domain info
         self.domains.lock().unwrap().push(domain_info);
 
-        println!("Initialized server {} with domain {}", self.config.name, self.config.domain);
+        println!(
+            "Initialized server {} with domain {}",
+            self.config.name, self.config.domain
+        );
     }
 
     /// Send a message to this server's message queue
@@ -123,23 +128,30 @@ impl ServerInstance {
     /// Create a user profile on this server
     async fn create_profile(&self, username: &str) -> String {
         let profile_id = format!("{}@{}", username, self.config.domain);
-        
-        let profile_msg = ProfileCreateMessage::new(
+
+        let _profile_msg = ProfileCreateMessage::new(
             profile_id.clone(),
             Some(format!("Test user {}", username)),
             None,
             None,
         );
 
-        println!("Created profile {} on server {}", profile_id, self.config.name);
+        println!(
+            "Created profile {} on server {}",
+            profile_id, self.config.name
+        );
         profile_id
     }
 
     /// Create a note from a user on this server
     async fn create_note(&self, author: &str, content: &str) -> String {
-        let note_id = format!("note-{}-{}", author.split('@').next().unwrap(), Uuid::new_v4());
-        
-        let note_msg = NoteCreateMessage::new(
+        let note_id = format!(
+            "note-{}-{}",
+            author.split('@').next().unwrap(),
+            Uuid::new_v4()
+        );
+
+        let _note_msg = NoteCreateMessage::new(
             author.to_string(),
             content.to_string(),
             None,
@@ -148,19 +160,22 @@ impl ServerInstance {
             None,
         );
 
-        println!("Created note {} by {} on server {}", note_id, author, self.config.name);
+        println!(
+            "Created note {} by {} on server {}",
+            note_id, author, self.config.name
+        );
         note_id
     }
 
     /// Follow a user on another server
     async fn follow_user(&self, follower: &str, target: &str) {
-        let follow_msg = FollowActivityMessage::new(
-            follower.to_string(),
-            target.to_string(),
-        );
+        let _follow_msg = FollowActivityMessage::new(follower.to_string(), target.to_string());
 
         // In a real implementation, this would create a Follow activity and send it to the target server
-        println!("{} on server {} is now following {}", follower, self.config.name, target);
+        println!(
+            "{} on server {} is now following {}",
+            follower, self.config.name, target
+        );
     }
 }
 
@@ -181,9 +196,20 @@ impl FederationNetwork {
     }
 
     /// Deliver an activity from one server to another
-    async fn deliver_activity(&self, from_domain: &str, to_domain: &str, activity_type: &str, actor: &str, object: Value) {
-        let from_server = self.find_server(from_domain).expect("Source server not found");
-        let to_server = self.find_server(to_domain).expect("Target server not found");
+    async fn deliver_activity(
+        &self,
+        from_domain: &str,
+        to_domain: &str,
+        activity_type: &str,
+        actor: &str,
+        object: Value,
+    ) {
+        let _from_server = self
+            .find_server(from_domain)
+            .expect("Source server not found");
+        let to_server = self
+            .find_server(to_domain)
+            .expect("Target server not found");
 
         // Create an incoming activity message
         let activity_msg = IncomingActivityMessage {
@@ -198,13 +224,28 @@ impl FederationNetwork {
 
         // Send the activity to the target server
         to_server.send_message(activity_msg.to_message()).await;
-        println!("Delivered {} activity from {} to {}", activity_type, from_domain, to_domain);
+        println!(
+            "Delivered {} activity from {} to {}",
+            activity_type, from_domain, to_domain
+        );
     }
 
     /// Deliver an object from one server to another
-    async fn deliver_object(&self, from_domain: &str, to_domain: &str, object_type: &str, attributed_to: &str, object: Value) {
-        let from_server = self.find_server(from_domain).expect("Source server not found");
-        let to_server = self.find_server(to_domain).expect("Target server not found");
+    #[allow(dead_code)]
+    async fn deliver_object(
+        &self,
+        from_domain: &str,
+        to_domain: &str,
+        object_type: &str,
+        attributed_to: &str,
+        object: Value,
+    ) {
+        let _from_server = self
+            .find_server(from_domain)
+            .expect("Source server not found");
+        let to_server = self
+            .find_server(to_domain)
+            .expect("Target server not found");
 
         // Create an incoming object message
         let object_msg = IncomingObjectMessage {
@@ -219,7 +260,10 @@ impl FederationNetwork {
 
         // Send the object to the target server
         to_server.send_message(object_msg.to_message()).await;
-        println!("Delivered {} object from {} to {}", object_type, from_domain, to_domain);
+        println!(
+            "Delivered {} object from {} to {}",
+            object_type, from_domain, to_domain
+        );
     }
 
     /// Process messages on all servers
@@ -271,12 +315,28 @@ async fn test_federation_between_three_servers() {
     let federation = FederationNetwork::new(vec![server1, server2, server3]);
 
     // Test scenario: Create users on each server
-    let alice = federation.find_server("alpha.example").unwrap().create_profile("alice").await;
-    let bob = federation.find_server("beta.example").unwrap().create_profile("bob").await;
-    let charlie = federation.find_server("gamma.example").unwrap().create_profile("charlie").await;
+    let alice = federation
+        .find_server("alpha.example")
+        .unwrap()
+        .create_profile("alice")
+        .await;
+    let bob = federation
+        .find_server("beta.example")
+        .unwrap()
+        .create_profile("bob")
+        .await;
+    let charlie = federation
+        .find_server("gamma.example")
+        .unwrap()
+        .create_profile("charlie")
+        .await;
 
     // Test scenario: Alice follows Bob
-    federation.find_server("alpha.example").unwrap().follow_user(&alice, &bob).await;
+    federation
+        .find_server("alpha.example")
+        .unwrap()
+        .follow_user(&alice, &bob)
+        .await;
 
     // Deliver the Follow activity from Alpha to Beta
     let follow_activity = json!({
@@ -285,14 +345,25 @@ async fn test_federation_between_three_servers() {
         "object": bob,
         "id": format!("https://alpha.example/activities/{}", Uuid::new_v4()),
     });
-    federation.deliver_activity("alpha.example", "beta.example", "Follow", &alice, follow_activity).await;
+    federation
+        .deliver_activity(
+            "alpha.example",
+            "beta.example",
+            "Follow",
+            &alice,
+            follow_activity,
+        )
+        .await;
 
     // Process messages on all servers
     federation.process_all_messages().await;
 
     // Test scenario: Bob creates a note
-    let bob_note_id = federation.find_server("beta.example").unwrap()
-        .create_note(&bob, "Hello from Beta server!").await;
+    let bob_note_id = federation
+        .find_server("beta.example")
+        .unwrap()
+        .create_note(&bob, "Hello from Beta server!")
+        .await;
 
     // Create a Note object
     let note_object = json!({
@@ -313,13 +384,25 @@ async fn test_federation_between_three_servers() {
     });
 
     // Deliver the Create activity from Beta to Alpha (because Alice follows Bob)
-    federation.deliver_activity("beta.example", "alpha.example", "Create", &bob, create_activity).await;
+    federation
+        .deliver_activity(
+            "beta.example",
+            "alpha.example",
+            "Create",
+            &bob,
+            create_activity,
+        )
+        .await;
 
     // Process messages on all servers
     federation.process_all_messages().await;
 
     // Test scenario: Charlie follows Alice
-    federation.find_server("gamma.example").unwrap().follow_user(&charlie, &alice).await;
+    federation
+        .find_server("gamma.example")
+        .unwrap()
+        .follow_user(&charlie, &alice)
+        .await;
 
     // Deliver the Follow activity from Gamma to Alpha
     let follow_activity = json!({
@@ -328,14 +411,25 @@ async fn test_federation_between_three_servers() {
         "object": alice,
         "id": format!("https://gamma.example/activities/{}", Uuid::new_v4()),
     });
-    federation.deliver_activity("gamma.example", "alpha.example", "Follow", &charlie, follow_activity).await;
+    federation
+        .deliver_activity(
+            "gamma.example",
+            "alpha.example",
+            "Follow",
+            &charlie,
+            follow_activity,
+        )
+        .await;
 
     // Process messages on all servers
     federation.process_all_messages().await;
 
     // Test scenario: Alice creates a note that mentions Bob
-    let alice_note_id = federation.find_server("alpha.example").unwrap()
-        .create_note(&alice, "Hello @bob@beta.example, how are you?").await;
+    let alice_note_id = federation
+        .find_server("alpha.example")
+        .unwrap()
+        .create_note(&alice, "Hello @bob@beta.example, how are you?")
+        .await;
 
     // Create a Note object with mentions
     let note_object = json!({
@@ -363,10 +457,26 @@ async fn test_federation_between_three_servers() {
     });
 
     // Deliver the Create activity from Alpha to Beta (because Alice mentioned Bob)
-    federation.deliver_activity("alpha.example", "beta.example", "Create", &alice, create_activity.clone()).await;
+    federation
+        .deliver_activity(
+            "alpha.example",
+            "beta.example",
+            "Create",
+            &alice,
+            create_activity.clone(),
+        )
+        .await;
 
     // Deliver the Create activity from Alpha to Gamma (because Charlie follows Alice)
-    federation.deliver_activity("alpha.example", "gamma.example", "Create", &alice, create_activity).await;
+    federation
+        .deliver_activity(
+            "alpha.example",
+            "gamma.example",
+            "Create",
+            &alice,
+            create_activity,
+        )
+        .await;
 
     // Process messages on all servers
     federation.process_all_messages().await;
@@ -381,7 +491,9 @@ async fn test_federation_between_three_servers() {
     });
 
     // Deliver the Like activity from Beta to Alpha
-    federation.deliver_activity("beta.example", "alpha.example", "Like", &bob, like_activity).await;
+    federation
+        .deliver_activity("beta.example", "alpha.example", "Like", &bob, like_activity)
+        .await;
 
     // Process messages on all servers
     federation.process_all_messages().await;

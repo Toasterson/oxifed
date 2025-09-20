@@ -5,8 +5,9 @@
 
 use axum::{
     Json, Router,
+    body::Body,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -25,6 +26,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{AppState, extract_domain_from_headers};
+use futures::TryStreamExt;
 
 /// Extract domain from ActivityPub activity content as fallback
 ///
@@ -79,6 +81,7 @@ fn extract_domain_from_activity(activity: &Value) -> Option<String> {
 
 /// Query parameters for collections
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct CollectionQuery {
     page: Option<bool>,
     min_id: Option<String>,
@@ -116,20 +119,46 @@ pub struct ActivityPubCollection {
 pub fn activitypub_router(_state: AppState) -> Router<AppState> {
     Router::new()
         // Actor endpoints
-        .route("/users/:username", get(get_actor))
-        .route("/users/:username/inbox", post(post_inbox))
-        .route("/users/:username/outbox", get(get_outbox).post(post_outbox))
-        .route("/users/:username/followers", get(get_followers))
-        .route("/users/:username/following", get(get_following))
-        .route("/users/:username/liked", get(get_liked))
-        .route("/users/:username/featured", get(get_featured))
+        .route("/users/{username}", get(get_actor))
+        .route("/users/{username}/inbox", post(post_inbox))
+        .route(
+            "/users/{username}/outbox",
+            get(get_outbox).post(post_outbox),
+        )
+        .route("/users/{username}/followers", get(get_followers))
+        .route("/users/{username}/following", get(get_following))
+        .route("/users/{username}/liked", get(get_liked))
+        .route("/users/{username}/featured", get(get_featured))
+        // C2S endpoints for direct object creation
+        .route("/users/{username}/notes", post(create_note))
+        .route("/users/{username}/articles", post(create_article))
+        .route("/users/{username}/media", post(upload_media))
+        // Collections with pagination
+        .route(
+            "/users/{username}/collections/featured",
+            get(get_featured_collection),
+        )
+        .route(
+            "/users/{username}/collections/tags/{tag}",
+            get(get_tag_collection),
+        )
         // Object endpoints
-        .route("/objects/:id", get(get_object))
-        .route("/activities/:id", get(get_activity))
+        .route(
+            "/objects/{id}",
+            get(get_object).put(update_object).delete(delete_object),
+        )
+        .route("/activities/{id}", get(get_activity))
         // Shared inbox
         .route("/inbox", post(post_shared_inbox))
+        // Search and discovery
+        .route("/search", get(search_content))
+        .route("/users", get(list_users))
         // Node info
         .route("/nodeinfo/2.0", get(get_nodeinfo))
+        // OAuth endpoints for C2S authentication
+        .route("/oauth/authorize", get(oauth_authorize))
+        .route("/oauth/token", post(oauth_token))
+        .route("/oauth/revoke", post(oauth_revoke))
 }
 
 /// Get actor profile
@@ -522,14 +551,35 @@ async fn get_outbox(
 /// Post to actor's outbox (C2S)
 async fn post_outbox(
     Path(username): Path<String>,
-    State(_state): State<AppState>,
-    Json(_activity): Json<Value>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(activity): Json<Value>,
 ) -> Result<Response, StatusCode> {
     info!("Posting to outbox for user: {}", username);
 
-    // TODO: Implement authentication for C2S
-    // For now, reject all C2S posts
-    Err(StatusCode::FORBIDDEN)
+    // Verify authentication via Bearer token or OAuth
+    if !verify_client_authentication(&headers, &username, &state).await {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // Process the client activity
+    match process_client_activity(activity, &username, &state).await {
+        Ok(activity_url) => {
+            // Return 201 Created with Location header pointing to the new activity
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::CREATED;
+            response.headers_mut().insert(
+                "Location",
+                HeaderValue::from_str(&activity_url)
+                    .unwrap_or_else(|_| HeaderValue::from_static("")),
+            );
+            Ok(response)
+        }
+        Err(e) => {
+            error!("Failed to process client activity: {}", e);
+            Err(StatusCode::BAD_REQUEST)
+        }
+    }
 }
 
 /// Get actor's followers
@@ -1487,7 +1537,8 @@ async fn store_article_object(object: &Value, state: &AppState) -> Result<(), St
 }
 
 /// Publish activity to message queue for delivery (from Activity struct)
-async fn publish_activity_message_struct(
+#[allow(dead_code)]
+pub async fn publish_activity_message_struct(
     activity: &Activity,
     _state: &AppState,
 ) -> Result<(), String> {
@@ -1562,4 +1613,1129 @@ fn extract_string_array(value: Option<&Value>) -> Option<Vec<String>> {
         Some(Value::String(s)) => Some(vec![s.clone()]),
         _ => None,
     }
+}
+
+/// Verify client authentication for C2S API
+///
+/// This function checks if the client is authenticated to post on behalf of the user.
+/// It supports Bearer token authentication and OAuth 2.0.
+async fn verify_client_authentication(
+    headers: &HeaderMap,
+    username: &str,
+    state: &AppState,
+) -> bool {
+    // Check for Authorization header
+    let auth_header = match headers.get("Authorization") {
+        Some(header) => header,
+        None => {
+            debug!("No Authorization header found");
+            return false;
+        }
+    };
+
+    let auth_str = match auth_header.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            debug!("Invalid Authorization header encoding");
+            return false;
+        }
+    };
+
+    // Parse Bearer token
+    if !auth_str.starts_with("Bearer ") {
+        debug!("Authorization header does not use Bearer scheme");
+        return false;
+    }
+
+    let token = &auth_str[7..]; // Skip "Bearer " prefix
+
+    // Verify token against database
+    match verify_access_token(token, username, state).await {
+        Ok(valid) => valid,
+        Err(e) => {
+            error!("Failed to verify access token: {}", e);
+            false
+        }
+    }
+}
+
+/// Verify an access token for a specific user
+async fn verify_access_token(
+    token: &str,
+    username: &str,
+    state: &AppState,
+) -> Result<bool, String> {
+    // TODO: Implement proper OAuth token verification
+    // For now, check a simple token format: "user:{username}:token:{random}"
+
+    // In production, this should:
+    // 1. Validate the token signature (for JWT)
+    // 2. Check token expiration
+    // 3. Verify the token is associated with the correct user
+    // 4. Check token scopes for required permissions
+
+    // Temporary implementation for development
+    if token.starts_with(&format!("user:{}:token:", username)) {
+        return Ok(true);
+    }
+
+    // Check database for valid tokens
+    let filter = mongodb::bson::doc! {
+        "token": token,
+        "username": username,
+        "expires_at": { "$gt": mongodb::bson::DateTime::now() }
+    };
+
+    match state
+        .db
+        .database()
+        .collection::<mongodb::bson::Document>("access_tokens")
+        .find_one(filter)
+        .await
+    {
+        Ok(Some(_)) => Ok(true),
+        Ok(None) => Ok(false),
+        Err(e) => Err(format!("Database error: {}", e)),
+    }
+}
+
+/// Process a client activity submitted via C2S API
+///
+/// This function handles activities submitted by authenticated clients,
+/// wraps them with proper server metadata, and publishes them for delivery.
+async fn process_client_activity(
+    mut activity: Value,
+    username: &str,
+    state: &AppState,
+) -> Result<String, String> {
+    info!("Processing client activity from user: {}", username);
+
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+
+    // Ensure the activity has required fields
+    if !activity.is_object() {
+        return Err("Activity must be a JSON object".to_string());
+    }
+
+    let activity_obj = activity.as_object_mut().unwrap();
+
+    // Add or verify the actor field
+    let actor_id = format!("https://{}/users/{}", domain, username);
+    match activity_obj.get("actor") {
+        Some(existing_actor) => {
+            // Verify the actor matches the authenticated user
+            if existing_actor.as_str() != Some(&actor_id) {
+                return Err(
+                    "Actor mismatch: activity actor must match authenticated user".to_string(),
+                );
+            }
+        }
+        None => {
+            // Add the actor field
+            activity_obj.insert("actor".to_string(), json!(actor_id));
+        }
+    }
+
+    // Generate activity ID if not present
+    let activity_id = match activity_obj.get("id") {
+        Some(id) => id.as_str().unwrap_or("").to_string(),
+        None => {
+            let id = format!("https://{}/activities/{}", domain, Uuid::new_v4());
+            activity_obj.insert("id".to_string(), json!(&id));
+            id
+        }
+    };
+
+    // Add timestamp if not present
+    if !activity_obj.contains_key("published") {
+        activity_obj.insert("published".to_string(), json!(Utc::now().to_rfc3339()));
+    }
+
+    // Validate activity type
+    let activity_type = activity_obj
+        .get("type")
+        .and_then(|t| t.as_str())
+        .ok_or("Activity must have a type field")?;
+
+    // Process based on activity type
+    match activity_type {
+        "Create" => process_create_activity_c2s(&mut activity, username, state).await?,
+        "Update" => process_update_activity_c2s(&mut activity, username, state).await?,
+        "Delete" => process_delete_activity_c2s(&mut activity, username, state).await?,
+        "Follow" => process_follow_activity_c2s(&mut activity, username, state).await?,
+        "Unfollow" | "Undo" => process_undo_activity_c2s(&mut activity, username, state).await?,
+        "Like" => process_like_activity_c2s(&mut activity, username, state).await?,
+        "Announce" => process_announce_activity_c2s(&mut activity, username, state).await?,
+        "Block" => process_block_activity_c2s(&mut activity, username, state).await?,
+        _ => {
+            warn!("Unsupported activity type for C2S: {}", activity_type);
+            return Err(format!("Unsupported activity type: {}", activity_type));
+        }
+    }
+
+    // Store the activity in the database
+    store_activity(&activity, state).await?;
+
+    // Add to actor's outbox
+    add_to_outbox(&activity_id, username, state).await?;
+
+    // Publish for delivery to followers
+    publish_activity_message(&activity, state).await?;
+
+    Ok(activity_id)
+}
+
+/// Process Create activity from C2S API
+async fn process_create_activity_c2s(
+    activity: &mut Value,
+    username: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+    let activity_obj = activity.as_object_mut().unwrap();
+
+    // Ensure object exists
+    let object = activity_obj
+        .get_mut("object")
+        .ok_or("Create activity must have an object")?;
+
+    // If object is just an ID, we need the full object
+    if object.is_string() {
+        return Err("Object must be embedded for Create activity in C2S".to_string());
+    }
+
+    // Add object metadata
+    if let Some(obj) = object.as_object_mut() {
+        // Generate object ID if not present
+        if !obj.contains_key("id") {
+            let _object_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("Note");
+
+            let object_id = format!("https://{}/objects/{}", domain, Uuid::new_v4());
+            obj.insert("id".to_string(), json!(object_id));
+        }
+
+        // Set attributedTo if not present
+        if !obj.contains_key("attributedTo") {
+            let actor_id = format!("https://{}/users/{}", domain, username);
+            obj.insert("attributedTo".to_string(), json!(actor_id));
+        }
+
+        // Add published timestamp if not present
+        if !obj.contains_key("published") {
+            obj.insert("published".to_string(), json!(Utc::now().to_rfc3339()));
+        }
+
+        // Store the object in the database
+        store_object_from_c2s(object, state).await?;
+    }
+
+    Ok(())
+}
+
+/// Process Update activity from C2S API
+async fn process_update_activity_c2s(
+    activity: &mut Value,
+    username: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    let activity_obj = activity.as_object_mut().unwrap();
+
+    // Ensure object exists
+    let object = activity_obj
+        .get("object")
+        .ok_or("Update activity must have an object")?;
+
+    // Verify ownership of the object being updated
+    let object_id = if object.is_string() {
+        object.as_str().unwrap()
+    } else {
+        object
+            .get("id")
+            .and_then(|id| id.as_str())
+            .ok_or("Object must have an ID")?
+    };
+
+    // Check that the user owns this object
+    if !verify_object_ownership(object_id, username, state).await? {
+        return Err("Cannot update object you don't own".to_string());
+    }
+
+    // If object is embedded, update it in the database
+    if object.is_object() {
+        store_object_from_c2s(object, state).await?;
+    }
+
+    Ok(())
+}
+
+/// Process Delete activity from C2S API
+async fn process_delete_activity_c2s(
+    activity: &mut Value,
+    username: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    let activity_obj = activity.as_object_mut().unwrap();
+
+    // Get the object being deleted
+    let object = activity_obj
+        .get("object")
+        .ok_or("Delete activity must have an object")?;
+
+    // Extract object ID
+    let object_id = if object.is_string() {
+        object.as_str().unwrap()
+    } else {
+        object
+            .get("id")
+            .and_then(|id| id.as_str())
+            .ok_or("Object must have an ID")?
+    };
+
+    // Verify ownership
+    if !verify_object_ownership(object_id, username, state).await? {
+        return Err("Cannot delete object you don't own".to_string());
+    }
+
+    // Mark object as deleted in database
+    mark_object_deleted(object_id, state).await?;
+
+    Ok(())
+}
+
+/// Process Follow activity from C2S API
+async fn process_follow_activity_c2s(
+    activity: &mut Value,
+    username: &str,
+    _state: &AppState,
+) -> Result<(), String> {
+    let activity_obj = activity.as_object_mut().unwrap();
+
+    // Ensure object (target of follow) exists
+    let target = activity_obj
+        .get("object")
+        .and_then(|o| o.as_str())
+        .ok_or("Follow activity must have an object (target actor)")?;
+
+    info!("User {} requesting to follow {}", username, target);
+
+    // The actual follow will be processed when we receive an Accept
+    // For now, just validate the request
+
+    Ok(())
+}
+
+/// Process Undo activity from C2S API
+async fn process_undo_activity_c2s(
+    activity: &mut Value,
+    username: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    let activity_obj = activity.as_object_mut().unwrap();
+
+    // Get the activity being undone
+    let undone_activity = activity_obj
+        .get("object")
+        .ok_or("Undo activity must have an object")?;
+
+    // If it's just an ID, fetch the activity
+    let undone_type = if undone_activity.is_string() {
+        // Fetch from database to get the type
+        fetch_activity_type(undone_activity.as_str().unwrap(), state).await?
+    } else {
+        undone_activity
+            .get("type")
+            .and_then(|t| t.as_str())
+            .ok_or("Undone activity must have a type")?
+            .to_string()
+    };
+
+    // Process based on what's being undone
+    match undone_type.as_str() {
+        "Follow" => {
+            info!("Processing unfollow from {}", username);
+            // Handle unfollow
+        }
+        "Like" => {
+            info!("Processing unlike from {}", username);
+            // Handle unlike
+        }
+        "Announce" => {
+            info!("Processing unboost from {}", username);
+            // Handle unboost
+        }
+        _ => {
+            warn!("Unsupported undo type: {}", undone_type);
+        }
+    }
+
+    Ok(())
+}
+
+/// Process Like activity from C2S API
+async fn process_like_activity_c2s(
+    activity: &mut Value,
+    username: &str,
+    _state: &AppState,
+) -> Result<(), String> {
+    let activity_obj = activity.as_object_mut().unwrap();
+
+    // Ensure object exists
+    let _object = activity_obj
+        .get("object")
+        .ok_or("Like activity must have an object")?;
+
+    info!("User {} liked an object", username);
+
+    Ok(())
+}
+
+/// Process Announce activity from C2S API (boost/reblog)
+async fn process_announce_activity_c2s(
+    activity: &mut Value,
+    username: &str,
+    _state: &AppState,
+) -> Result<(), String> {
+    let activity_obj = activity.as_object_mut().unwrap();
+
+    // Ensure object exists
+    let _object = activity_obj
+        .get("object")
+        .ok_or("Announce activity must have an object")?;
+
+    info!("User {} announced an object", username);
+
+    Ok(())
+}
+
+/// Process Block activity from C2S API
+async fn process_block_activity_c2s(
+    activity: &mut Value,
+    username: &str,
+    _state: &AppState,
+) -> Result<(), String> {
+    let activity_obj = activity.as_object_mut().unwrap();
+
+    // Ensure object (target actor) exists
+    let _target = activity_obj
+        .get("object")
+        .ok_or("Block activity must have an object")?;
+
+    info!("User {} blocked someone", username);
+
+    Ok(())
+}
+
+/// Store an object from C2S API
+async fn store_object_from_c2s(object: &Value, state: &AppState) -> Result<(), String> {
+    let object_type = object
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("Note");
+
+    match object_type {
+        "Note" => store_note_object(object, state).await,
+        "Article" => store_article_object(object, state).await,
+        _ => {
+            warn!("Unsupported object type for storage: {}", object_type);
+            Ok(())
+        }
+    }
+}
+
+/// Verify that a user owns an object
+async fn verify_object_ownership(
+    object_id: &str,
+    username: &str,
+    state: &AppState,
+) -> Result<bool, String> {
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+    let filter = mongodb::bson::doc! {
+        "id": object_id,
+        "attributedTo": format!("https://{}/users/{}", domain, username)
+    };
+
+    match state
+        .db
+        .database()
+        .collection::<mongodb::bson::Document>("objects")
+        .find_one(filter)
+        .await
+    {
+        Ok(Some(_)) => Ok(true),
+        Ok(None) => Ok(false),
+        Err(e) => Err(format!("Database error: {}", e)),
+    }
+}
+
+/// Mark an object as deleted
+async fn mark_object_deleted(object_id: &str, state: &AppState) -> Result<(), String> {
+    let filter = mongodb::bson::doc! { "id": object_id };
+    let update = mongodb::bson::doc! {
+        "$set": {
+            "deleted": true,
+            "updated": mongodb::bson::DateTime::now()
+        }
+    };
+
+    state
+        .db
+        .database()
+        .collection::<mongodb::bson::Document>("objects")
+        .update_one(filter, update)
+        .await
+        .map_err(|e| format!("Failed to mark object as deleted: {}", e))?;
+
+    Ok(())
+}
+
+/// Add activity to actor's outbox
+async fn add_to_outbox(activity_id: &str, username: &str, state: &AppState) -> Result<(), String> {
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+    let outbox_item = mongodb::bson::doc! {
+        "actor": format!("https://{}/users/{}", domain, username),
+        "activity_id": activity_id,
+        "created_at": mongodb::bson::DateTime::now()
+    };
+
+    state
+        .db
+        .database()
+        .collection::<mongodb::bson::Document>("outbox")
+        .insert_one(outbox_item)
+        .await
+        .map_err(|e| format!("Failed to add to outbox: {}", e))?;
+
+    Ok(())
+}
+
+/// Fetch activity type from database
+async fn fetch_activity_type(activity_id: &str, state: &AppState) -> Result<String, String> {
+    let filter = mongodb::bson::doc! { "id": activity_id };
+
+    let doc = state
+        .db
+        .database()
+        .collection::<mongodb::bson::Document>("activities")
+        .find_one(filter)
+        .await
+        .map_err(|e| format!("Database error: {}", e))?
+        .ok_or("Activity not found")?;
+
+    doc.get_str("type")
+        .map(|s| s.to_string())
+        .map_err(|_| "Activity has no type field".to_string())
+}
+
+/// Create a note via C2S API
+async fn create_note(
+    Path(username): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(note): Json<Value>,
+) -> Result<Response, StatusCode> {
+    info!("Creating note for user: {}", username);
+
+    // Verify authentication
+    if !verify_client_authentication(&headers, &username, &state).await {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+
+    // Wrap the note in a Create activity
+    let activity = json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Create",
+        "actor": format!("https://{}/users/{}", domain, username),
+        "object": {
+            "type": "Note",
+            "content": note.get("content").cloned().unwrap_or(json!("")),
+            "to": note.get("to").cloned().unwrap_or(json!(["https://www.w3.org/ns/activitystreams#Public"])),
+            "cc": note.get("cc").cloned().unwrap_or(json!([format!("https://{}/users/{}/followers", domain, username)])),
+            "inReplyTo": note.get("inReplyTo").cloned(),
+            "sensitive": note.get("sensitive").cloned().unwrap_or(json!(false)),
+            "summary": note.get("summary").cloned(),
+            "tag": note.get("tag").cloned(),
+            "attachment": note.get("attachment").cloned(),
+        }
+    });
+
+    // Process the activity
+    match process_client_activity(activity, &username, &state).await {
+        Ok(activity_url) => {
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::CREATED;
+            response.headers_mut().insert(
+                "Location",
+                HeaderValue::from_str(&activity_url)
+                    .unwrap_or_else(|_| HeaderValue::from_static("")),
+            );
+            Ok(response)
+        }
+        Err(e) => {
+            error!("Failed to create note: {}", e);
+            Err(StatusCode::BAD_REQUEST)
+        }
+    }
+}
+
+/// Create an article via C2S API
+async fn create_article(
+    Path(username): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(article): Json<Value>,
+) -> Result<Response, StatusCode> {
+    info!("Creating article for user: {}", username);
+
+    // Verify authentication
+    if !verify_client_authentication(&headers, &username, &state).await {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+
+    // Wrap the article in a Create activity
+    let activity = json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Create",
+        "actor": format!("https://{}/users/{}", domain, username),
+        "object": {
+            "type": "Article",
+            "name": article.get("name").cloned().unwrap_or(json!("Untitled")),
+            "content": article.get("content").cloned().unwrap_or(json!("")),
+            "summary": article.get("summary").cloned(),
+            "to": article.get("to").cloned().unwrap_or(json!(["https://www.w3.org/ns/activitystreams#Public"])),
+            "cc": article.get("cc").cloned().unwrap_or(json!([format!("https://{}/users/{}/followers", domain, username)])),
+            "tag": article.get("tag").cloned(),
+            "attachment": article.get("attachment").cloned(),
+        }
+    });
+
+    // Process the activity
+    match process_client_activity(activity, &username, &state).await {
+        Ok(activity_url) => {
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::CREATED;
+            response.headers_mut().insert(
+                "Location",
+                HeaderValue::from_str(&activity_url)
+                    .unwrap_or_else(|_| HeaderValue::from_static("")),
+            );
+            Ok(response)
+        }
+        Err(e) => {
+            error!("Failed to create article: {}", e);
+            Err(StatusCode::BAD_REQUEST)
+        }
+    }
+}
+
+/// Upload media via C2S API
+async fn upload_media(
+    Path(username): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Response, StatusCode> {
+    info!("Uploading media for user: {}", username);
+
+    // Verify authentication
+    if !verify_client_authentication(&headers, &username, &state).await {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+
+    // Get content type from headers
+    let content_type = headers
+        .get("Content-Type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream");
+
+    // Generate media ID
+    let media_id = Uuid::new_v4();
+    let media_url = format!("https://{}/media/{}", domain, media_id);
+
+    // Store media metadata in database
+    let media_doc = mongodb::bson::doc! {
+        "id": &media_url,
+        "uploadedBy": format!("https://{}/users/{}", domain, username),
+        "contentType": content_type,
+        "size": body.len() as i64,
+        "uploadedAt": mongodb::bson::DateTime::now(),
+    };
+
+    state
+        .db
+        .database()
+        .collection::<mongodb::bson::Document>("media")
+        .insert_one(media_doc)
+        .await
+        .map_err(|e| {
+            error!("Failed to store media metadata: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // TODO: Store actual media file to object storage
+
+    // Return media object
+    let media_object = json!({
+        "type": "Document",
+        "mediaType": content_type,
+        "url": media_url,
+    });
+
+    Ok(Json(media_object).into_response())
+}
+
+/// Get featured collection
+async fn get_featured_collection(
+    Path(username): Path<String>,
+    Query(query): Query<CollectionQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, StatusCode> {
+    info!("Getting featured collection for user: {}", username);
+
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+
+    // Build filter for featured items
+    let filter = mongodb::bson::doc! {
+        "actor": format!("https://{}/users/{}", domain, username),
+        "featured": true
+    };
+
+    // Apply pagination
+    let limit = query.limit.unwrap_or(20).min(100) as i64;
+
+    let items: Vec<mongodb::bson::Document> = state
+        .db
+        .database()
+        .collection("objects")
+        .find(filter)
+        .limit(limit)
+        .sort(mongodb::bson::doc! { "_id": -1 })
+        .await
+        .map_err(|e| {
+            error!("Failed to get featured items: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .try_collect()
+        .await
+        .map_err(|e| {
+            error!("Failed to collect featured items: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let collection = ActivityPubCollection {
+        context: vec!["https://www.w3.org/ns/activitystreams".to_string()],
+        collection_type: "OrderedCollection".to_string(),
+        id: format!("https://{}/users/{}/collections/featured", domain, username),
+        total_items: Some(items.len() as u64),
+        items: None,
+        ordered_items: Some(
+            items
+                .into_iter()
+                .map(|doc| serde_json::to_value(doc).unwrap_or(json!(null)))
+                .collect(),
+        ),
+        first: None,
+        last: None,
+        next: None,
+        prev: None,
+        part_of: None,
+    };
+
+    Ok(Json(collection).into_response())
+}
+
+/// Get tag collection
+async fn get_tag_collection(
+    Path((username, tag)): Path<(String, String)>,
+    Query(query): Query<CollectionQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, StatusCode> {
+    info!("Getting tag collection '{}' for user: {}", tag, username);
+
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+
+    // Build filter for items with this tag
+    let filter = mongodb::bson::doc! {
+        "actor": format!("https://{}/users/{}", domain, username),
+        "tag.name": &tag
+    };
+
+    // Apply pagination
+    let limit = query.limit.unwrap_or(20).min(100) as i64;
+
+    let items: Vec<mongodb::bson::Document> = state
+        .db
+        .database()
+        .collection("objects")
+        .find(filter)
+        .limit(limit)
+        .sort(mongodb::bson::doc! { "_id": -1 })
+        .await
+        .map_err(|e| {
+            error!("Failed to get tag items: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .try_collect()
+        .await
+        .map_err(|e| {
+            error!("Failed to collect tag items: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let collection = ActivityPubCollection {
+        context: vec!["https://www.w3.org/ns/activitystreams".to_string()],
+        collection_type: "OrderedCollection".to_string(),
+        id: format!(
+            "https://{}/users/{}/collections/tags/{}",
+            domain, username, tag
+        ),
+        total_items: Some(items.len() as u64),
+        items: None,
+        ordered_items: Some(
+            items
+                .into_iter()
+                .map(|doc| serde_json::to_value(doc).unwrap_or(json!(null)))
+                .collect(),
+        ),
+        first: None,
+        last: None,
+        next: None,
+        prev: None,
+        part_of: None,
+    };
+
+    Ok(Json(collection).into_response())
+}
+
+/// Update an object via C2S API
+async fn update_object(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(updates): Json<Value>,
+) -> Result<Response, StatusCode> {
+    info!("Updating object: {}", id);
+
+    // Extract username from token
+    let username = extract_username_from_headers(&headers, &state)
+        .await
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // Verify authentication
+    if !verify_client_authentication(&headers, &username, &state).await {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+
+    // Verify ownership
+    let object_id = format!("https://{}/objects/{}", domain, id);
+    if !verify_object_ownership(&object_id, &username, &state)
+        .await
+        .unwrap_or(false)
+    {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Create Update activity
+    // Merge the object_id with updates
+    let mut object_with_id = updates.as_object().cloned().unwrap_or_default();
+    object_with_id.insert("id".to_string(), json!(object_id));
+
+    let activity = json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Update",
+        "actor": format!("https://{}/users/{}", domain, username),
+        "object": object_with_id
+    });
+
+    // Process the activity
+    process_client_activity(activity, &username, &state)
+        .await
+        .map_err(|e| {
+            error!("Failed to update object: {}", e);
+            StatusCode::BAD_REQUEST
+        })?;
+
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Delete an object via C2S API
+async fn delete_object(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    info!("Deleting object: {}", id);
+
+    // Extract username from token
+    let username = extract_username_from_headers(&headers, &state)
+        .await
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // Verify authentication
+    if !verify_client_authentication(&headers, &username, &state).await {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let domain = std::env::var("OXIFED_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+
+    // Verify ownership
+    let object_id = format!("https://{}/objects/{}", domain, id);
+    if !verify_object_ownership(&object_id, &username, &state)
+        .await
+        .unwrap_or(false)
+    {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Create Delete activity
+    let activity = json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Delete",
+        "actor": format!("https://{}/users/{}", domain, username),
+        "object": object_id
+    });
+
+    // Process the activity
+    process_client_activity(activity, &username, &state)
+        .await
+        .map_err(|e| {
+            error!("Failed to delete object: {}", e);
+            StatusCode::BAD_REQUEST
+        })?;
+
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Search for content
+async fn search_content(
+    Query(params): Query<std::collections::HashMap<String, String>>,
+    State(state): State<AppState>,
+) -> Result<Response, StatusCode> {
+    let query = params.get("q").ok_or(StatusCode::BAD_REQUEST)?;
+    info!("Searching for: {}", query);
+
+    // Build search filter
+    let filter = mongodb::bson::doc! {
+        "$text": { "$search": query }
+    };
+
+    let results: Vec<mongodb::bson::Document> = state
+        .db
+        .database()
+        .collection("objects")
+        .find(filter)
+        .limit(20)
+        .await
+        .map_err(|e| {
+            error!("Search failed: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .try_collect()
+        .await
+        .map_err(|e| {
+            error!("Failed to collect search results: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(json!({
+        "type": "Collection",
+        "totalItems": results.len(),
+        "items": results
+    }))
+    .into_response())
+}
+
+/// List users
+async fn list_users(
+    Query(query): Query<CollectionQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, StatusCode> {
+    info!("Listing users");
+
+    let limit = query.limit.unwrap_or(20).min(100) as i64;
+
+    let users: Vec<mongodb::bson::Document> = state
+        .db
+        .database()
+        .collection("actors")
+        .find(mongodb::bson::doc! {})
+        .limit(limit)
+        .sort(mongodb::bson::doc! { "created_at": -1 })
+        .await
+        .map_err(|e| {
+            error!("Failed to list users: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .try_collect()
+        .await
+        .map_err(|e| {
+            error!("Failed to collect users: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(json!({
+        "type": "Collection",
+        "totalItems": users.len(),
+        "items": users
+    }))
+    .into_response())
+}
+
+/// OAuth authorization endpoint
+async fn oauth_authorize(
+    Query(params): Query<std::collections::HashMap<String, String>>,
+    State(_state): State<AppState>,
+) -> Result<Response, StatusCode> {
+    let client_id = params.get("client_id").ok_or(StatusCode::BAD_REQUEST)?;
+    let redirect_uri = params.get("redirect_uri").ok_or(StatusCode::BAD_REQUEST)?;
+
+    info!("OAuth authorization request from client: {}", client_id);
+
+    // TODO: Implement OAuth authorization flow
+    // For now, return a basic authorization page
+    let html = format!(
+        r#"
+        <html>
+        <body>
+            <h1>Authorize Application</h1>
+            <p>Application {} is requesting access to your account.</p>
+            <form method="post" action="/oauth/authorize">
+                <input type="hidden" name="client_id" value="{}">
+                <input type="hidden" name="redirect_uri" value="{}">
+                <button type="submit" name="action" value="allow">Allow</button>
+                <button type="submit" name="action" value="deny">Deny</button>
+            </form>
+        </body>
+        </html>
+        "#,
+        client_id, client_id, redirect_uri
+    );
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/html")
+        .body(Body::from(html))
+        .unwrap())
+}
+
+/// OAuth token endpoint
+async fn oauth_token(
+    State(state): State<AppState>,
+    Json(request): Json<Value>,
+) -> Result<Response, StatusCode> {
+    let grant_type = request
+        .get("grant_type")
+        .and_then(|v| v.as_str())
+        .ok_or(StatusCode::BAD_REQUEST)?;
+
+    info!("OAuth token request with grant_type: {}", grant_type);
+
+    match grant_type {
+        "authorization_code" => {
+            // Handle authorization code grant
+            let _code = request
+                .get("code")
+                .and_then(|v| v.as_str())
+                .ok_or(StatusCode::BAD_REQUEST)?;
+
+            // TODO: Validate code and generate access token
+            let token = format!("token:{}", Uuid::new_v4());
+
+            // Store token in database
+            let token_doc = mongodb::bson::doc! {
+                "token": &token,
+                "client_id": request.get("client_id").and_then(|v| v.as_str()).unwrap_or(""),
+                "created_at": mongodb::bson::DateTime::now(),
+                "expires_at": mongodb::bson::DateTime::from_millis(
+                    chrono::Utc::now().timestamp_millis() + 3600000
+                ),
+            };
+
+            state
+                .db
+                .database()
+                .collection::<mongodb::bson::Document>("access_tokens")
+                .insert_one(token_doc)
+                .await
+                .map_err(|e| {
+                    error!("Failed to store access token: {}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+
+            Ok(Json(json!({
+                "access_token": token,
+                "token_type": "Bearer",
+                "expires_in": 3600
+            }))
+            .into_response())
+        }
+        _ => {
+            error!("Unsupported grant type: {}", grant_type);
+            Err(StatusCode::BAD_REQUEST)
+        }
+    }
+}
+
+/// OAuth revoke endpoint
+async fn oauth_revoke(
+    State(state): State<AppState>,
+    Json(request): Json<Value>,
+) -> Result<Response, StatusCode> {
+    let token = request
+        .get("token")
+        .and_then(|v| v.as_str())
+        .ok_or(StatusCode::BAD_REQUEST)?;
+
+    info!("Revoking OAuth token");
+
+    // Delete token from database
+    let filter = mongodb::bson::doc! { "token": token };
+
+    state
+        .db
+        .database()
+        .collection::<mongodb::bson::Document>("access_tokens")
+        .delete_one(filter)
+        .await
+        .map_err(|e| {
+            error!("Failed to revoke token: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Extract username from authentication headers
+async fn extract_username_from_headers(headers: &HeaderMap, state: &AppState) -> Option<String> {
+    let auth_header = headers.get("Authorization")?;
+    let auth_str = auth_header.to_str().ok()?;
+
+    if !auth_str.starts_with("Bearer ") {
+        return None;
+    }
+
+    let token = &auth_str[7..];
+
+    // Look up token in database
+    let filter = mongodb::bson::doc! {
+        "token": token,
+        "expires_at": { "$gt": mongodb::bson::DateTime::now() }
+    };
+
+    let token_doc = state
+        .db
+        .database()
+        .collection::<mongodb::bson::Document>("access_tokens")
+        .find_one(filter)
+        .await
+        .ok()?;
+
+    token_doc?.get_str("username").ok().map(|s| s.to_string())
 }

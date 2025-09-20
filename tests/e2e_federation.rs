@@ -6,7 +6,6 @@
 //! - ActivityPub message sending and receiving between domains
 //! - Cross-domain federation capabilities
 
-use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
 
@@ -20,17 +19,15 @@ use tracing_subscriber;
 use uuid::Uuid;
 
 // Import oxifed messaging types
-use oxifed::messaging::{
-    DomainCreateMessage, DomainInfo, DomainRpcRequest, DomainRpcResponse, DomainRpcResult, Message,
-    MessageEnum,
-};
 
 // Test configuration from environment
 struct TestConfig {
     solarm_url: String,
     space_url: String,
     aopc_url: String,
+    #[allow(dead_code)]
     mongodb_uri: String,
+    #[allow(dead_code)]
     amqp_uri: String,
 }
 
@@ -70,6 +67,7 @@ struct WebFingerLink {
 
 // ActivityPub structures
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct Actor {
     #[serde(rename = "@context")]
     context: Value,
@@ -84,7 +82,8 @@ struct Actor {
     publicKey: Option<PublicKey>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[allow(non_snake_case)]
 struct PublicKey {
     id: String,
     owner: String,
@@ -92,6 +91,7 @@ struct PublicKey {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code, non_snake_case)]
 struct Note {
     #[serde(rename = "@context")]
     context: Value,
@@ -106,6 +106,7 @@ struct Note {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct Activity {
     #[serde(rename = "@context")]
     context: Value,
@@ -386,7 +387,9 @@ impl E2ETestHelper {
 #[tokio::test]
 async fn test_e2e_federation_workflow() {
     // Initialize tracing
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = E2ETestHelper::new();
 
@@ -663,7 +666,9 @@ async fn test_e2e_federation_workflow() {
 
 #[tokio::test]
 async fn test_domain_resolution() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = E2ETestHelper::new();
 
@@ -784,7 +789,9 @@ async fn test_domain_resolution() {
 
 #[tokio::test]
 async fn test_message_federation_reliability() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = E2ETestHelper::new();
 
@@ -815,7 +822,7 @@ async fn test_message_federation_reliability() {
         .create_domain(&helper.config.space_url, "solarm.space", "Test", "Test")
         .await;
 
-    let sender = helper
+    let _sender = helper
         .create_actor(&helper.config.solarm_url, "social.solarm.org", "sender")
         .await
         .expect("Failed to create sender");

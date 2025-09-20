@@ -14,7 +14,7 @@ use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 use tracing_subscriber;
 use uuid::Uuid;
 
@@ -28,7 +28,9 @@ struct InteropTestConfig {
     snac_url: String,
     mitra_url: String,
     // Infrastructure
+    #[allow(dead_code)]
     mongodb_uri: String,
+    #[allow(dead_code)]
     amqp_uri: String,
 }
 
@@ -84,6 +86,7 @@ struct WebFingerLink {
 
 // Mastodon-compatible API structures for Mitra
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct MastodonAccount {
     id: String,
     username: String,
@@ -102,6 +105,7 @@ struct MastodonAccount {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct MastodonStatus {
     id: String,
     uri: String,
@@ -434,7 +438,9 @@ impl InteropTestHelper {
 
 #[tokio::test]
 async fn test_webfinger_discovery_interop() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = InteropTestHelper::new();
 
@@ -487,7 +493,9 @@ async fn test_webfinger_discovery_interop() {
 
 #[tokio::test]
 async fn test_oxifed_to_snac_follow() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = InteropTestHelper::new();
 
@@ -499,7 +507,7 @@ async fn test_oxifed_to_snac_follow() {
         .expect("Services failed to start");
 
     // Create Oxifed actor
-    let oxifed_actor_url = format!("{}/users/alice", helper.config.solarm_url);
+    let _oxifed_actor_url = format!("{}/users/alice", helper.config.solarm_url);
 
     // snac admin actor
     let snac_actor_url = format!("{}/users/admin", helper.config.snac_url);
@@ -537,7 +545,9 @@ async fn test_oxifed_to_snac_follow() {
 
 #[tokio::test]
 async fn test_oxifed_to_mitra_interaction() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = InteropTestHelper::new();
 
@@ -589,7 +599,9 @@ async fn test_oxifed_to_mitra_interaction() {
 
 #[tokio::test]
 async fn test_multi_implementation_note_federation() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = InteropTestHelper::new();
 
@@ -639,7 +651,9 @@ async fn test_multi_implementation_note_federation() {
 
 #[tokio::test]
 async fn test_comprehensive_interop_scenario() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = InteropTestHelper::new();
 
@@ -674,7 +688,7 @@ async fn test_comprehensive_interop_scenario() {
         let from = &test_implementations[i];
         let to = &test_implementations[(i + 1) % test_implementations.len()];
 
-        let from_actor = format!("{}/users/{}", from.1, from.2);
+        let _from_actor = format!("{}/users/{}", from.1, from.2);
         let to_actor = format!("{}/users/{}", to.1, to.2);
 
         info!("Creating follow: {:?} → {:?}", from.0, to.0);
@@ -706,7 +720,7 @@ async fn test_comprehensive_interop_scenario() {
     info!("Creating content on each implementation");
 
     // Oxifed creates a note
-    let oxifed_note = json!({
+    let _oxifed_note = json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Note",
         "id": format!("{}/notes/{}", helper.config.solarm_url, Uuid::new_v4()),
@@ -717,7 +731,7 @@ async fn test_comprehensive_interop_scenario() {
     });
 
     // snac creates a post
-    let snac_post = helper
+    let _snac_post = helper
         .create_snac_post("admin", "Greetings from snac! Federation test in progress.")
         .await
         .expect("Failed to create snac post");
@@ -757,7 +771,9 @@ async fn test_comprehensive_interop_scenario() {
 
 #[tokio::test]
 async fn test_error_handling_interop() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = InteropTestHelper::new();
 
@@ -788,7 +804,7 @@ async fn test_error_handling_interop() {
     }
 
     // 2. Malformed activities
-    let malformed_activity = json!({
+    let _malformed_activity = json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "InvalidType",
         "actor": "not-a-valid-actor"

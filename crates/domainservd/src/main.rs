@@ -133,8 +133,8 @@ async fn main() -> Result<(), DomainservdError> {
         .merge(activitypub::activitypub_router(app_state.clone()))
         .with_state(app_state);
 
-    let addr = "0.0.0.0:3000";
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let addr = std::env::var("BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("Listening on {}", addr);
 
     axum::serve(listener, app).await?;

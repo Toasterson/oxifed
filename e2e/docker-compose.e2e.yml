@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   # Shared Infrastructure
@@ -35,7 +35,7 @@ services:
     volumes:
       - rabbitmq-e2e-data:/var/lib/lavinmq
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:15672"]
+      test: ["CMD", "lavinmqctl", "status"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -51,7 +51,7 @@ services:
       DOMAIN_NAME: social.solarm.org
       DOMAIN_PORT: 8080
       MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
-      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672
       SERVER_NAME: social.solarm.org
       BIND_ADDRESS: 0.0.0.0:8080
     ports:
@@ -80,7 +80,7 @@ services:
       DOMAIN_NAME: solarm.space
       DOMAIN_PORT: 8080
       MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
-      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672
       SERVER_NAME: solarm.space
       BIND_ADDRESS: 0.0.0.0:8080
     ports:
@@ -109,7 +109,7 @@ services:
       DOMAIN_NAME: social.aopc.cloud
       DOMAIN_PORT: 8080
       MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
-      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672
       SERVER_NAME: social.aopc.cloud
       BIND_ADDRESS: 0.0.0.0:8080
     ports:
@@ -137,7 +137,7 @@ services:
       RUST_LOG: debug
       DOMAIN_NAME: social.solarm.org
       MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
-      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       mongodb:
         condition: service_healthy
@@ -157,7 +157,7 @@ services:
       RUST_LOG: debug
       DOMAIN_NAME: solarm.space
       MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
-      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       mongodb:
         condition: service_healthy
@@ -177,7 +177,7 @@ services:
       RUST_LOG: debug
       DOMAIN_NAME: social.aopc.cloud
       MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
-      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       mongodb:
         condition: service_healthy
@@ -219,7 +219,16 @@ services:
       - oxifed-e2e
     volumes:
       - ./test-results:/test-results
-    command: ["cargo", "test", "--test", "e2e_federation", "--", "--nocapture", "--test-threads=1"]
+    command:
+      [
+        "cargo",
+        "test",
+        "--test",
+        "e2e_federation",
+        "--",
+        "--nocapture",
+        "--test-threads=1",
+      ]
 
 networks:
   oxifed-e2e:

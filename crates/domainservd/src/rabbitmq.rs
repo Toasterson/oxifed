@@ -15,17 +15,16 @@ use lapin::{
 
 use mongodb::bson::Bson;
 use oxifed::messaging::{
-    AcceptActivityMessage, AnnounceActivityMessage, DomainCreateMessage, DomainDeleteMessage,
-    DomainInfo, DomainRpcRequest, DomainRpcResponse, DomainUpdateMessage, FollowActivityMessage,
-    KeyGenerateMessage, LikeActivityMessage, Message, MessageEnum, NoteCreateMessage, NoteDeleteMessage,
-    NoteUpdateMessage, ProfileCreateMessage, ProfileDeleteMessage, ProfileUpdateMessage,
-    RejectActivityMessage,
+    AcceptActivityMessage, AnnounceActivityMessage, DomainInfo, DomainRpcResponse,
+    FollowActivityMessage, KeyGenerateMessage, LikeActivityMessage, Message, MessageEnum,
+    NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
+    ProfileDeleteMessage, ProfileUpdateMessage, RejectActivityMessage,
 };
-use oxifed::pki::{KeyAlgorithm, PkiManager, TrustLevel};
 use oxifed::messaging::{
     EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INCOMING_PROCESS, EXCHANGE_INTERNAL_PUBLISH,
     EXCHANGE_RPC_REQUEST, EXCHANGE_RPC_RESPONSE, QUEUE_RPC_DOMAIN,
 };
+use oxifed::pki::{KeyAlgorithm, PkiManager};
 use serde::de::Error;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -473,7 +472,10 @@ async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQE
 }
 
 /// Handle key generation request
-async fn handle_key_generate(db: &Arc<MongoDB>, msg: &KeyGenerateMessage) -> Result<(), RabbitMQError> {
+async fn handle_key_generate(
+    db: &Arc<MongoDB>,
+    msg: &KeyGenerateMessage,
+) -> Result<(), RabbitMQError> {
     info!("Generating key for actor: {}", msg.actor);
 
     // Create PKI manager
@@ -519,8 +521,14 @@ async fn handle_key_generate(db: &Arc<MongoDB>, msg: &KeyGenerateMessage) -> Res
                     _ => None,
                 },
                 public_key_pem: user_key.public_key.pem_data.clone(),
-                private_key_pem: user_key.private_key.as_ref().map(|pk| pk.encrypted_pem.clone()),
-                encryption_algorithm: user_key.private_key.as_ref().map(|pk| pk.encryption_algorithm.clone()),
+                private_key_pem: user_key
+                    .private_key
+                    .as_ref()
+                    .map(|pk| pk.encrypted_pem.clone()),
+                encryption_algorithm: user_key
+                    .private_key
+                    .as_ref()
+                    .map(|pk| pk.encryption_algorithm.clone()),
                 fingerprint: user_key.public_key.fingerprint.clone(),
                 trust_level: user_key.trust_level,
                 domain_signature: user_key.domain_signature.map(|ds| {
@@ -528,7 +536,10 @@ async fn handle_key_generate(db: &Arc<MongoDB>, msg: &KeyGenerateMessage) -> Res
                     doc.insert("domain", ds.domain);
                     doc.insert("signature", ds.signature);
                     let system_time: SystemTime = ds.signed_at.into();
-                    doc.insert("signed_at", mongodb::bson::Bson::DateTime(system_time.into()));
+                    doc.insert(
+                        "signed_at",
+                        mongodb::bson::Bson::DateTime(system_time.into()),
+                    );
                     doc.insert("domain_key_id", ds.domain_key_id);
                     doc.insert("verification_chain", ds.verification_chain);
                     doc
@@ -590,7 +601,6 @@ async fn process_rpc_message(
     properties: &lapin::BasicProperties,
 ) -> Result<(), RabbitMQError> {
     use lapin::options::BasicPublishOptions;
-    use oxifed::messaging::{DomainRpcRequest, DomainRpcResponse, DomainRpcResult};
 
     // Parse the message envelope first (MessageEnum wrapper)
     let message: MessageEnum = match serde_json::from_slice(data) {
@@ -674,7 +684,6 @@ async fn handle_list_domains_rpc(db: &Arc<MongoDB>, request_id: &str) -> DomainR
     use mongodb::bson::doc;
     use oxifed::database::DomainDocument;
 
-    let db_manager = oxifed::database::DatabaseManager::new(db.database().clone());
     let collection: mongodb::Collection<DomainDocument> = db.database().collection("domains");
 
     match collection.find(doc! {}).await {
@@ -905,6 +914,7 @@ async fn handle_follow(
 }
 
 /// Handle Accept activity (typically in response to a Follow)
+#[allow(dead_code)]
 async fn handle_accept_activity(
     db: &Arc<MongoDB>,
     activity: &oxifed::Activity,
@@ -932,6 +942,7 @@ async fn handle_accept_activity(
 }
 
 /// Add a follower relationship to the database
+#[allow(dead_code)]
 async fn add_follower_relationship(
     db: &Arc<MongoDB>,
     follower_id: &str,
@@ -977,6 +988,7 @@ async fn add_follower_relationship(
 }
 
 /// Remove a follower relationship from the database
+#[allow(dead_code)]
 async fn remove_follower_relationship(
     db: &Arc<MongoDB>,
     follower_id: &str,
@@ -1013,6 +1025,7 @@ async fn remove_follower_relationship(
 }
 
 // ActivityPub-compliant delivery to followers according to W3C specification
+#[allow(dead_code)]
 async fn publish_activity_to_activitypub_exchange(
     activity: &oxifed::Activity,
 ) -> Result<(), RabbitMQError> {
@@ -1685,37 +1698,38 @@ async fn create_person_object(
 
     // Generate a key for the actor
     let mut pki_manager = PkiManager::new();
-    let public_key_doc = match pki_manager.generate_user_key(actor_id.clone(), KeyAlgorithm::Ed25519) {
-        Ok(user_key) => {
-            info!(
-                "Key generated successfully for actor: {}, key ID: {}",
-                actor_id, user_key.key_id
-            );
+    let public_key_doc =
+        match pki_manager.generate_user_key(actor_id.clone(), KeyAlgorithm::Ed25519) {
+            Ok(user_key) => {
+                info!(
+                    "Key generated successfully for actor: {}, key ID: {}",
+                    actor_id, user_key.key_id
+                );
 
-            // Convert to PublicKeyDocument
-            Some(oxifed::database::PublicKeyDocument {
-                id: user_key.key_id.clone(),
-                owner: actor_id.clone(),
-                public_key_pem: user_key.public_key.pem_data.clone(),
-                algorithm: match user_key.public_key.algorithm {
-                    KeyAlgorithm::Rsa { key_size } => {
-                        format!("rsa-{}", key_size)
+                // Convert to PublicKeyDocument
+                Some(oxifed::database::PublicKeyDocument {
+                    id: user_key.key_id.clone(),
+                    owner: actor_id.clone(),
+                    public_key_pem: user_key.public_key.pem_data.clone(),
+                    algorithm: match user_key.public_key.algorithm {
+                        KeyAlgorithm::Rsa { key_size } => {
+                            format!("rsa-{}", key_size)
+                        }
+                        KeyAlgorithm::Ed25519 => "ed25519".to_string(),
                     },
-                    KeyAlgorithm::Ed25519 => "ed25519".to_string(),
-                },
-                key_size: match user_key.public_key.algorithm {
-                    KeyAlgorithm::Rsa { key_size } => Some(key_size),
-                    KeyAlgorithm::Ed25519 => None,
-                },
-                fingerprint: user_key.public_key.fingerprint.clone(),
-                created_at: now,
-            })
-        },
-        Err(e) => {
-            error!("Failed to generate key for actor {}: {}", actor_id, e);
-            None
-        }
-    };
+                    key_size: match user_key.public_key.algorithm {
+                        KeyAlgorithm::Rsa { key_size } => Some(key_size),
+                        KeyAlgorithm::Ed25519 => None,
+                    },
+                    fingerprint: user_key.public_key.fingerprint.clone(),
+                    created_at: now,
+                })
+            }
+            Err(e) => {
+                error!("Failed to generate key for actor {}: {}", actor_id, e);
+                None
+            }
+        };
 
     // Create the actor document using unified database schema
     let actor_doc = oxifed::database::ActorDocument {

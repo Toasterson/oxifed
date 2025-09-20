@@ -206,7 +206,7 @@ fn test_rpc_error_workflow() {
     // 2. Simulate request transmission
     let request_bytes = serde_json::to_vec(&client_request.to_message()).unwrap();
     let server_message: MessageEnum = serde_json::from_slice(&request_bytes).unwrap();
-    let server_request = match server_message {
+    let _server_request = match server_message {
         MessageEnum::DomainRpcRequest(req) => req,
         _ => panic!("Expected DomainRpcRequest"),
     };
@@ -246,7 +246,7 @@ fn test_domain_not_found_workflow() {
     let request_bytes = serde_json::to_vec(&client_request.to_message()).unwrap();
     let server_message: MessageEnum = serde_json::from_slice(&request_bytes).unwrap();
 
-    if let MessageEnum::DomainRpcRequest(server_request) = server_message {
+    if let MessageEnum::DomainRpcRequest(_server_request) = server_message {
         // 3. Server responds with None (domain not found, but no error)
         let server_response = DomainRpcResponse::domain_details(request_id.clone(), None);
 

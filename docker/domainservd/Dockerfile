@@ -1,4 +1,4 @@
-FROM rust:1.75-slim as builder
+FROM rustlang/rust:nightly-slim as builder
 
 WORKDIR /app
 
@@ -13,9 +13,10 @@ RUN apt-get update && apt-get install -y \
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY src/ src/
+COPY test-data/ test-data/
 
 # Build the domainservd binary
-RUN cargo build --release --bin domainservd
+RUN cargo build --release -p domainservd --bin domainservd
 
 # Runtime stage
 FROM debian:bookworm-slim

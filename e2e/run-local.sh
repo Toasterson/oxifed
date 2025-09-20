@@ -80,12 +80,12 @@ EOF
 cleanup() {
     if [ "$CLEANUP" = true ]; then
         print_info "Cleaning up containers..."
-        docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" down -v --remove-orphans
+        docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" down -v --remove-orphans
         print_success "Cleanup complete"
     else
         print_warning "Skipping cleanup - containers are still running"
         print_info "To manually cleanup, run:"
-        echo "    docker-compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME down -v"
+        echo "    docker compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME down -v"
     fi
 }
 
@@ -98,7 +98,7 @@ check_dependencies() {
         exit 1
     fi
 
-    if ! command -v docker-compose &> /dev/null; then
+    if ! docker compose version &> /dev/null; then
         print_error "Docker Compose is not installed or not in PATH"
         exit 1
     fi
@@ -140,7 +140,7 @@ build_images() {
 start_services() {
     print_info "Starting services with Docker Compose..."
 
-    local compose_cmd="docker-compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME"
+    local compose_cmd="docker compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME"
 
     # Start infrastructure services first
     $compose_cmd up -d mongodb rabbitmq
@@ -163,11 +163,11 @@ start_services() {
     # Check service health
     local services=("mongodb" "rabbitmq" "domainservd-solarm" "domainservd-space" "domainservd-aopc")
     for service in "${services[@]}"; do
-        if docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" ps | grep -q "$service.*Up"; then
+        if docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" ps | grep -q "$service.*Up"; then
             print_success "$service is running"
         else
             print_error "$service is not running"
-            docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" logs "$service"
+            docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" logs "$service"
             exit 1
         fi
     done
@@ -196,7 +196,7 @@ run_tests() {
     print_info "Test command: $test_cmd"
 
     # Run tests in container
-    docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" run \
+    docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" run \
         --rm \
         -e RUST_BACKTRACE=1 \
         -e RUST_LOG=debug \
@@ -212,7 +212,7 @@ run_tests() {
 
         # Show logs on failure
         print_warning "Showing recent logs from services..."
-        docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" logs --tail=50
+        docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" logs --tail=50
     fi
 
     return $test_result
@@ -221,7 +221,7 @@ run_tests() {
 # Function to show container logs
 show_logs() {
     print_info "Showing container logs..."
-    docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" logs -f
+    docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" logs -f
 }
 
 # Function to run tests with timeout
@@ -300,7 +300,7 @@ main() {
 
     # Show logs in background if requested
     if [ "$SHOW_LOGS" = true ]; then
-        docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" logs -f &
+        docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" logs -f &
         LOGS_PID=$!
     fi
 
@@ -317,7 +317,7 @@ main() {
         print_info "Containers are still running. You can interact with them using:"
         echo ""
         echo "  # View logs"
-        echo "  docker-compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME logs -f"
+        echo "  docker compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME logs -f"
         echo ""
         echo "  # Access MongoDB"
         echo "  docker exec -it mongodb-e2e mongosh --username root --password testpassword"
@@ -331,7 +331,7 @@ main() {
         echo "  curl http://localhost:8083/health  # social.aopc.cloud"
         echo ""
         echo "  # Stop and cleanup"
-        echo "  docker-compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME down -v"
+        echo "  docker compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME down -v"
     fi
 
     exit $TEST_RESULT

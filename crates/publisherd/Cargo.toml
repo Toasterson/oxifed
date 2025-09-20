@@ -3,6 +3,10 @@ name = "publisherd"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "publisherd"
+path = "src/main.rs"
+
 [dependencies]
 oxifed = { path = "../.." }
 lapin.workspace = true

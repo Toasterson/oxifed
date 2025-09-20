@@ -113,12 +113,12 @@ EOF
 cleanup() {
     if [ "$CLEANUP" = true ]; then
         print_info "Cleaning up containers..."
-        docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" down -v --remove-orphans
+        docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" down -v --remove-orphans
         print_success "Cleanup complete"
     else
         print_warning "Skipping cleanup - containers are still running"
         print_info "To manually cleanup, run:"
-        echo "    docker-compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME down -v"
+        echo "    docker compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME down -v"
     fi
 }
 
@@ -131,7 +131,7 @@ check_dependencies() {
         exit 1
     fi
 
-    if ! command -v docker-compose &> /dev/null; then
+    if ! docker compose version &> /dev/null; then
         print_error "Docker Compose is not installed or not in PATH"
         exit 1
     fi
@@ -260,7 +260,7 @@ run_tests() {
     print_info "Test command: $test_cmd"
 
     # Run tests in container
-    docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" run \
+    docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" run \
         --rm \
         -e RUST_BACKTRACE=1 \
         -e RUST_LOG=debug \
@@ -383,7 +383,7 @@ main() {
 
     # Show logs in background if requested
     if [ "$SHOW_LOGS" = true ]; then
-        docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" logs -f &
+        docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" logs -f &
         LOGS_PID=$!
     fi
 
@@ -399,10 +399,10 @@ main() {
     echo ""
     if [ "$KEEP_RUNNING" = true ]; then
         show_status
-        print_info "Services are still running. You can interact with them using:"
+        print_info "Containers are still running. You can interact with them using:"
         echo ""
         echo "  # View logs"
-        echo "  docker-compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME logs -f"
+        echo "  docker compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME logs -f"
         echo ""
         echo "  # Test WebFinger discovery"
         echo "  curl 'http://localhost:8084/.well-known/webfinger?resource=acct:admin@snac.aopc.cloud'"
@@ -412,7 +412,7 @@ main() {
         echo "  curl http://localhost:8085/api/v1/instance | jq"
         echo ""
         echo "  # Stop and cleanup"
-        echo "  docker-compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME down -v"
+        echo "  docker compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT_NAME down -v"
     fi
 
     exit $TEST_RESULT

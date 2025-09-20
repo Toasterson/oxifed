@@ -3,6 +3,8 @@
 //! This module implements ActivityPub-compliant delivery of activities to followers
 //! according to the W3C ActivityPub specification section 7.1.
 
+#![allow(dead_code)]
+
 use crate::db::MongoDB;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

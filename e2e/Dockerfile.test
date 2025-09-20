@@ -1,4 +1,4 @@
-FROM rust:1.75-bookworm
+FROM rustlang/rust:nightly
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -13,6 +13,9 @@ WORKDIR /app
 
 # Copy the entire project
 COPY . .
+
+# Ensure test-data is copied
+COPY test-data/ test-data/
 
 # Build dependencies first (for better caching)
 RUN cargo build --release --tests

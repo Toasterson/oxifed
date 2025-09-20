@@ -6,7 +6,6 @@
 //! - Announce (boost/repost) functionality
 //! - Activity ordering and federation
 
-use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
 
@@ -15,7 +14,7 @@ use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::info;
 use tracing_subscriber;
 use uuid::Uuid;
 
@@ -24,7 +23,9 @@ struct TestConfig {
     solarm_url: String,
     space_url: String,
     aopc_url: String,
+    #[allow(dead_code)]
     mongodb_uri: String,
+    #[allow(dead_code)]
     amqp_uri: String,
 }
 
@@ -47,6 +48,7 @@ impl TestConfig {
 
 // ActivityPub Activity types
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct Follow {
     #[serde(rename = "@context")]
     context: Value,
@@ -59,6 +61,7 @@ struct Follow {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct Accept {
     #[serde(rename = "@context")]
     context: Value,
@@ -71,6 +74,7 @@ struct Accept {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct Reject {
     #[serde(rename = "@context")]
     context: Value,
@@ -83,6 +87,7 @@ struct Reject {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct Like {
     #[serde(rename = "@context")]
     context: Value,
@@ -95,6 +100,7 @@ struct Like {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct Announce {
     #[serde(rename = "@context")]
     context: Value,
@@ -109,6 +115,7 @@ struct Announce {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct Undo {
     #[serde(rename = "@context")]
     context: Value,
@@ -544,7 +551,9 @@ impl ActivityPubTestHelper {
 
 #[tokio::test]
 async fn test_follow_accept_workflow() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = ActivityPubTestHelper::new();
 
@@ -614,7 +623,9 @@ async fn test_follow_accept_workflow() {
 
 #[tokio::test]
 async fn test_follow_reject_workflow() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = ActivityPubTestHelper::new();
 
@@ -681,7 +692,9 @@ async fn test_follow_reject_workflow() {
 
 #[tokio::test]
 async fn test_like_workflow() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = ActivityPubTestHelper::new();
 
@@ -698,12 +711,12 @@ async fn test_like_workflow() {
         .await
         .expect("Failed to create author");
 
-    let liker1_id = helper
+    let _liker1_id = helper
         .create_test_actor(&helper.config.space_url, "solarm.space", "liker1")
         .await
         .expect("Failed to create liker1");
 
-    let liker2_id = helper
+    let _liker2_id = helper
         .create_test_actor(&helper.config.aopc_url, "social.aopc.cloud", "liker2")
         .await
         .expect("Failed to create liker2");
@@ -751,7 +764,9 @@ async fn test_like_workflow() {
 
 #[tokio::test]
 async fn test_announce_workflow() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = ActivityPubTestHelper::new();
 
@@ -763,7 +778,7 @@ async fn test_announce_workflow() {
         .expect("Services failed to start");
 
     // Create test actors
-    let original_id = helper
+    let _original_id = helper
         .create_test_actor(&helper.config.solarm_url, "social.solarm.org", "original")
         .await
         .expect("Failed to create original author");
@@ -847,7 +862,9 @@ async fn test_announce_workflow() {
 
 #[tokio::test]
 async fn test_undo_workflow() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = ActivityPubTestHelper::new();
 
@@ -915,7 +932,7 @@ async fn test_undo_workflow() {
         "published": Utc::now().to_rfc3339()
     });
 
-    let follow_id = helper
+    let _follow_id = helper
         .send_follow(&helper.config.solarm_url, "user", &target_id)
         .await
         .expect("Failed to send follow");
@@ -965,7 +982,9 @@ async fn test_undo_workflow() {
 
 #[tokio::test]
 async fn test_comprehensive_activitypub_workflow() {
-    tracing_subscriber::fmt().with_env_filter("debug").init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let helper = ActivityPubTestHelper::new();
 
@@ -1074,7 +1093,7 @@ async fn test_comprehensive_activitypub_workflow() {
     // Step 3: Alice and Charlie like Bob's note
     info!("Step 3: Multiple actors like Bob's note");
 
-    let alice_like_id = helper
+    let _alice_like_id = helper
         .send_like(&helper.config.solarm_url, "alice_comp", &bob_note_id)
         .await
         .expect("Alice failed to like Bob's note");

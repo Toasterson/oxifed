@@ -201,7 +201,8 @@ run_docker_tests() {
     print_info "Running command: $test_cmd"
 
     # Run tests in Docker container
-    docker-compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" run \
+    # Run tests in container
+    docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT_NAME" run \
         --rm \
         -e RUST_BACKTRACE=1 \
         -e RUST_LOG=debug \
