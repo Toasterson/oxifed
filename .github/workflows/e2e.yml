@@ -1,0 +1,353 @@
+name: E2E Federation Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "src/**"
+      - "crates/**"
+      - "tests/**"
+      - "e2e/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/e2e.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "src/**"
+      - "crates/**"
+      - "tests/**"
+      - "e2e/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/e2e.yml"
+  workflow_dispatch:
+    inputs:
+      test_filter:
+        description: "Test name filter (optional)"
+        required: false
+        type: string
+      debug_enabled:
+        description: "Enable debug logging"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_LOG: ${{ github.event.inputs.debug_enabled == 'true' && 'debug' || 'info' }}
+
+jobs:
+  e2e-tests:
+    name: E2E Federation Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mongodb:
+        image: mongo:8
+        env:
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: testpassword
+          MONGO_INITDB_DATABASE: oxifed
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd="mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      rabbitmq:
+        image: cloudamqp/lavinmq:latest
+        env:
+          RABBITMQ_DEFAULT_USER: admin
+          RABBITMQ_DEFAULT_PASS: testpassword
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd="curl -f http://localhost:15672 || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-e2e-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-e2e-
+            ${{ runner.os }}-cargo-build-
+
+      - name: Build services
+        run: |
+          echo "Building domainservd..."
+          cargo build --release --bin domainservd
+          echo "Building publisherd..."
+          cargo build --release --bin publisherd
+          echo "Building test binaries..."
+          cargo build --release --tests
+          echo "Building ActivityPub test binary..."
+          cargo build --release --test e2e_federation_activitypub
+
+      - name: Start domainservd instances
+        run: |
+          # Create directories for each instance
+          mkdir -p /tmp/oxifed/{solarm,space,aopc}/{logs,data}
+
+          # Start social.solarm.org instance
+          DOMAIN_NAME=social.solarm.org \
+          DOMAIN_PORT=8081 \
+          SERVER_NAME=social.solarm.org \
+          BIND_ADDRESS=0.0.0.0:8081 \
+          MONGODB_URI="mongodb://root:testpassword@localhost:27017/oxifed?authSource=admin" \
+          AMQP_URI="amqp://admin:testpassword@localhost:5672" \
+          ./target/release/domainservd > /tmp/oxifed/solarm/logs/domainservd.log 2>&1 &
+          echo $! > /tmp/oxifed/solarm/domainservd.pid
+
+          # Start solarm.space instance
+          DOMAIN_NAME=solarm.space \
+          DOMAIN_PORT=8082 \
+          SERVER_NAME=solarm.space \
+          BIND_ADDRESS=0.0.0.0:8082 \
+          MONGODB_URI="mongodb://root:testpassword@localhost:27017/oxifed?authSource=admin" \
+          AMQP_URI="amqp://admin:testpassword@localhost:5672" \
+          ./target/release/domainservd > /tmp/oxifed/space/logs/domainservd.log 2>&1 &
+          echo $! > /tmp/oxifed/space/domainservd.pid
+
+          # Start social.aopc.cloud instance
+          DOMAIN_NAME=social.aopc.cloud \
+          DOMAIN_PORT=8083 \
+          SERVER_NAME=social.aopc.cloud \
+          BIND_ADDRESS=0.0.0.0:8083 \
+          MONGODB_URI="mongodb://root:testpassword@localhost:27017/oxifed?authSource=admin" \
+          AMQP_URI="amqp://admin:testpassword@localhost:5672" \
+          ./target/release/domainservd > /tmp/oxifed/aopc/logs/domainservd.log 2>&1 &
+          echo $! > /tmp/oxifed/aopc/domainservd.pid
+
+          echo "Waiting for domainservd instances to start..."
+          sleep 10
+
+      - name: Start publisherd instances
+        run: |
+          # Start publisherd for social.solarm.org
+          DOMAIN_NAME=social.solarm.org \
+          MONGODB_URI="mongodb://root:testpassword@localhost:27017/oxifed?authSource=admin" \
+          AMQP_URI="amqp://admin:testpassword@localhost:5672" \
+          ./target/release/publisherd > /tmp/oxifed/solarm/logs/publisherd.log 2>&1 &
+          echo $! > /tmp/oxifed/solarm/publisherd.pid
+
+          # Start publisherd for solarm.space
+          DOMAIN_NAME=solarm.space \
+          MONGODB_URI="mongodb://root:testpassword@localhost:27017/oxifed?authSource=admin" \
+          AMQP_URI="amqp://admin:testpassword@localhost:5672" \
+          ./target/release/publisherd > /tmp/oxifed/space/logs/publisherd.log 2>&1 &
+          echo $! > /tmp/oxifed/space/publisherd.pid
+
+          # Start publisherd for social.aopc.cloud
+          DOMAIN_NAME=social.aopc.cloud \
+          MONGODB_URI="mongodb://root:testpassword@localhost:27017/oxifed?authSource=admin" \
+          AMQP_URI="amqp://admin:testpassword@localhost:5672" \
+          ./target/release/publisherd > /tmp/oxifed/aopc/logs/publisherd.log 2>&1 &
+          echo $! > /tmp/oxifed/aopc/publisherd.pid
+
+          echo "Waiting for publisherd instances to start..."
+          sleep 5
+
+      - name: Verify services are running
+        run: |
+          echo "Checking service health..."
+
+          # Check domainservd instances
+          for port in 8081 8082 8083; do
+            echo "Checking domainservd on port $port..."
+            for i in {1..10}; do
+              if curl -f http://localhost:$port/health 2>/dev/null; then
+                echo "✓ domainservd on port $port is healthy"
+                break
+              fi
+              if [ $i -eq 10 ]; then
+                echo "✗ domainservd on port $port failed to start"
+                exit 1
+              fi
+              sleep 2
+            done
+          done
+
+          # List running processes
+          echo "Running processes:"
+          ps aux | grep -E "(domainservd|publisherd)" | grep -v grep || true
+
+      - name: Run E2E tests
+        env:
+          SOLARM_URL: http://localhost:8081
+          SPACE_URL: http://localhost:8082
+          AOPC_URL: http://localhost:8083
+          MONGODB_URI: mongodb://root:testpassword@localhost:27017/oxifed?authSource=admin
+          AMQP_URI: amqp://admin:testpassword@localhost:5672
+        run: |
+          test_args="--test e2e_federation"
+
+          # Add test filter if provided
+          if [ -n "${{ github.event.inputs.test_filter }}" ]; then
+            test_args="$test_args ${{ github.event.inputs.test_filter }}"
+          fi
+
+          # Run federation tests with output
+          cargo test $test_args -- --nocapture --test-threads=1
+
+          # Run ActivityPub workflow tests
+          echo "Running ActivityPub workflow tests..."
+          cargo test --test e2e_federation_activitypub -- --nocapture --test-threads=1
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Collecting service logs ==="
+
+          echo "--- social.solarm.org domainservd logs ---"
+          cat /tmp/oxifed/solarm/logs/domainservd.log || echo "No logs found"
+
+          echo "--- solarm.space domainservd logs ---"
+          cat /tmp/oxifed/space/logs/domainservd.log || echo "No logs found"
+
+          echo "--- social.aopc.cloud domainservd logs ---"
+          cat /tmp/oxifed/aopc/logs/domainservd.log || echo "No logs found"
+
+          echo "--- social.solarm.org publisherd logs ---"
+          cat /tmp/oxifed/solarm/logs/publisherd.log || echo "No logs found"
+
+          echo "--- solarm.space publisherd logs ---"
+          cat /tmp/oxifed/space/logs/publisherd.log || echo "No logs found"
+
+          echo "--- social.aopc.cloud publisherd logs ---"
+          cat /tmp/oxifed/aopc/logs/publisherd.log || echo "No logs found"
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-logs-${{ github.run_id }}
+          path: /tmp/oxifed/*/logs/*.log
+          retention-days: 7
+
+      - name: Cleanup processes
+        if: always()
+        run: |
+          echo "Stopping services..."
+
+          # Stop all services using PID files
+          for pidfile in /tmp/oxifed/*/*.pid; do
+            if [ -f "$pidfile" ]; then
+              pid=$(cat "$pidfile")
+              echo "Stopping process $pid..."
+              kill $pid 2>/dev/null || true
+            fi
+          done
+
+          # Give processes time to shut down
+          sleep 2
+
+          # Force kill if necessary
+          pkill -f domainservd || true
+          pkill -f publisherd || true
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "# E2E Test Report" > test-report.md
+          echo "" >> test-report.md
+          echo "**Run ID:** ${{ github.run_id }}" >> test-report.md
+          echo "**Triggered by:** ${{ github.event_name }}" >> test-report.md
+          echo "**Branch:** ${{ github.ref_name }}" >> test-report.md
+          echo "**Commit:** ${{ github.sha }}" >> test-report.md
+          echo "**Test Suites:** Federation + ActivityPub Workflows" >> test-report.md
+          echo "" >> test-report.md
+
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ **Status:** All tests passed" >> test-report.md
+            echo "" >> test-report.md
+            echo "**Tests Completed:**" >> test-report.md
+            echo "- ✅ Core Federation Tests" >> test-report.md
+            echo "- ✅ ActivityPub Workflow Tests (Follow, Like, Announce, Undo)" >> test-report.md
+          else
+            echo "❌ **Status:** Tests failed" >> test-report.md
+            echo "" >> test-report.md
+            echo "Check logs for details on which test suite failed." >> test-report.md
+          fi
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-${{ github.run_id }}
+          path: test-report.md
+          retention-days: 30
+
+  e2e-docker:
+    name: E2E Tests with Docker Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run E2E tests with Docker Compose
+        run: |
+          cd e2e
+          chmod +x run-local.sh
+          ./run-local.sh --verbose
+
+      - name: Collect Docker logs on failure
+        if: failure()
+        run: |
+          cd e2e
+          docker-compose -f docker-compose.e2e.yml -p oxifed-e2e logs > docker-compose.log
+          echo "Docker Compose logs collected"
+
+      - name: Upload Docker Compose logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-compose-logs-${{ github.run_id }}
+          path: e2e/docker-compose.log
+          retention-days: 7
+
+      - name: Cleanup Docker resources
+        if: always()
+        run: |
+          cd e2e
+          docker-compose -f docker-compose.e2e.yml -p oxifed-e2e down -v --remove-orphans || true

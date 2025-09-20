@@ -1,0 +1,137 @@
+FROM rust:1.75-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    pkg-config \
+    libssl-dev \
+    postgresql-client \
+    jq \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the entire project
+COPY . .
+
+# Build dependencies first (for better caching)
+RUN cargo build --release --tests
+
+# Build the interop test specifically
+RUN cargo build --release --test e2e_interop
+
+# Install additional testing tools
+RUN cargo install --locked cargo-nextest || true
+
+# Create directory for test results
+RUN mkdir -p /test-results
+
+# Create a test runner script
+RUN cat > /app/run-interop-tests.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "Starting Interoperability Test Suite"
+echo "====================================="
+
+# Wait for all services to be ready
+echo "Waiting for services to initialize..."
+
+# Check Oxifed instances
+for port in 8080 8081 8082; do
+    echo -n "Checking Oxifed on port $port..."
+    for i in {1..30}; do
+        if curl -f http://domainservd-solarm:$port/health 2>/dev/null || \
+           curl -f http://domainservd-space:$port/health 2>/dev/null || \
+           curl -f http://domainservd-aopc:$port/health 2>/dev/null; then
+            echo " Ready!"
+            break
+        fi
+        if [ $i -eq 30 ]; then
+            echo " Failed!"
+            exit 1
+        fi
+        sleep 2
+    done
+done
+
+# Check snac
+echo -n "Checking snac..."
+for i in {1..30}; do
+    if curl -f http://snac:8080/.well-known/webfinger?resource=acct:admin@snac.aopc.cloud 2>/dev/null; then
+        echo " Ready!"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo " Warning: snac might not be ready"
+    fi
+    sleep 2
+done
+
+# Check Mitra
+echo -n "Checking Mitra..."
+for i in {1..30}; do
+    if curl -f http://mitra:8080/api/v1/instance 2>/dev/null; then
+        echo " Ready!"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo " Warning: Mitra might not be ready"
+    fi
+    sleep 2
+done
+
+echo ""
+echo "Running Interoperability Tests"
+echo "-------------------------------"
+
+# Run the interop tests
+if [ -n "$TEST_FILTER" ]; then
+    echo "Running filtered tests: $TEST_FILTER"
+    cargo test --test e2e_interop $TEST_FILTER -- --nocapture --test-threads=1
+else
+    echo "Running all interop tests"
+    cargo test --test e2e_interop -- --nocapture --test-threads=1
+fi
+
+TEST_RESULT=$?
+
+# Generate test report
+echo ""
+echo "Generating test report..."
+cat > /test-results/interop-report.json << EOREPORT
+{
+    "timestamp": "$(date -Iseconds)",
+    "test_suite": "interoperability",
+    "implementations_tested": [
+        "oxifed",
+        "snac",
+        "mitra"
+    ],
+    "result": $([ $TEST_RESULT -eq 0 ] && echo '"passed"' || echo '"failed"'),
+    "exit_code": $TEST_RESULT
+}
+EOREPORT
+
+echo "Test report saved to /test-results/interop-report.json"
+
+# Summary
+echo ""
+echo "====================================="
+if [ $TEST_RESULT -eq 0 ]; then
+    echo "✅ Interoperability Tests PASSED"
+else
+    echo "❌ Interoperability Tests FAILED"
+fi
+echo "====================================="
+
+exit $TEST_RESULT
+EOF
+
+RUN chmod +x /app/run-interop-tests.sh
+
+# Default command runs the interop test script
+CMD ["/app/run-interop-tests.sh"]

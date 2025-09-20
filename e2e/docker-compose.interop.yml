@@ -1,0 +1,357 @@
+version: '3.8'
+
+services:
+  # Shared Infrastructure (reuse from main E2E setup)
+  mongodb:
+    image: mongo:8
+    container_name: mongodb-interop
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: testpassword
+      MONGO_INITDB_DATABASE: oxifed
+    ports:
+      - "27017:27017"
+    networks:
+      - oxifed-interop
+    volumes:
+      - mongodb-interop-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: cloudamqp/lavinmq:latest
+    container_name: rabbitmq-interop
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: testpassword
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - oxifed-interop
+    volumes:
+      - rabbitmq-interop-data:/var/lib/lavinmq
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:15672"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL for Mitra
+  postgres-mitra:
+    image: postgres:15-alpine
+    container_name: postgres-mitra
+    environment:
+      POSTGRES_DB: mitra
+      POSTGRES_USER: mitra
+      POSTGRES_PASSWORD: mitrapassword
+    ports:
+      - "5432:5432"
+    networks:
+      - oxifed-interop
+    volumes:
+      - postgres-mitra-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mitra"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Oxifed instances (3 domains)
+  domainservd-solarm:
+    build:
+      context: ..
+      dockerfile: docker/domainservd/Dockerfile
+    container_name: domainservd-solarm-interop
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: social.solarm.org
+      DOMAIN_PORT: 8080
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      SERVER_NAME: social.solarm.org
+      BIND_ADDRESS: 0.0.0.0:8080
+    ports:
+      - "8081:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - oxifed-interop
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  domainservd-space:
+    build:
+      context: ..
+      dockerfile: docker/domainservd/Dockerfile
+    container_name: domainservd-space-interop
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: solarm.space
+      DOMAIN_PORT: 8080
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      SERVER_NAME: solarm.space
+      BIND_ADDRESS: 0.0.0.0:8080
+    ports:
+      - "8082:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - oxifed-interop
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  domainservd-aopc:
+    build:
+      context: ..
+      dockerfile: docker/domainservd/Dockerfile
+    container_name: domainservd-aopc-interop
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: social.aopc.cloud
+      DOMAIN_PORT: 8080
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      SERVER_NAME: social.aopc.cloud
+      BIND_ADDRESS: 0.0.0.0:8080
+    ports:
+      - "8083:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - oxifed-interop
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Publisher services for oxifed
+  publisherd-solarm:
+    build:
+      context: ..
+      dockerfile: docker/publisherd/Dockerfile
+    container_name: publisherd-solarm-interop
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: social.solarm.org
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      domainservd-solarm:
+        condition: service_healthy
+    networks:
+      - oxifed-interop
+
+  publisherd-space:
+    build:
+      context: ..
+      dockerfile: docker/publisherd/Dockerfile
+    container_name: publisherd-space-interop
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: solarm.space
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      domainservd-space:
+        condition: service_healthy
+    networks:
+      - oxifed-interop
+
+  publisherd-aopc:
+    build:
+      context: ..
+      dockerfile: docker/publisherd/Dockerfile
+    container_name: publisherd-aopc-interop
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: social.aopc.cloud
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      domainservd-aopc:
+        condition: service_healthy
+    networks:
+      - oxifed-interop
+
+  # snac instance - Simple ActivityPub server
+  snac:
+    build:
+      context: .
+      dockerfile: Dockerfile.snac
+    container_name: snac-aopc
+    environment:
+      SNAC_DOMAIN: snac.aopc.cloud
+      SNAC_PORT: 8080
+      SNAC_ADMIN_USER: admin
+      SNAC_ADMIN_EMAIL: admin@snac.aopc.cloud
+      SNAC_DATA_DIR: /data
+      SNAC_DEBUG: 1
+    ports:
+      - "8084:8080"
+    volumes:
+      - snac-data:/data
+    networks:
+      - oxifed-interop
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/.well-known/webfinger?resource=acct:admin@snac.aopc.cloud"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Mitra instance - Federated social media server
+  mitra:
+    build:
+      context: .
+      dockerfile: Dockerfile.mitra
+    container_name: mitra-aopc
+    environment:
+      # Mitra configuration
+      MITRA_HOSTNAME: mitra.aopc.cloud
+      MITRA_PORT: 8080
+      MITRA_DATABASE_URL: postgres://mitra:mitrapassword@postgres-mitra:5432/mitra
+      MITRA_SECRET_KEY: super_secret_key_for_testing_only_change_in_production
+      MITRA_REGISTRATION_MODE: open
+      MITRA_FEDERATION_ENABLED: "true"
+      MITRA_DEBUG: "true"
+      # Storage settings
+      MITRA_MEDIA_DIR: /app/media
+      MITRA_STATIC_DIR: /app/static
+      # Instance info
+      MITRA_INSTANCE_NAME: "Mitra Test Instance"
+      MITRA_INSTANCE_DESCRIPTION: "Mitra instance for E2E interoperability testing"
+      # Admin user
+      MITRA_ADMIN_USERNAME: admin
+      MITRA_ADMIN_EMAIL: admin@mitra.aopc.cloud
+    ports:
+      - "8085:8080"
+    depends_on:
+      postgres-mitra:
+        condition: service_healthy
+    volumes:
+      - mitra-data:/app/media
+      - mitra-static:/app/static
+    networks:
+      - oxifed-interop
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/instance"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Test runner service with extended capabilities
+  test-runner-interop:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.test.interop
+    container_name: e2e-test-runner-interop
+    environment:
+      RUST_LOG: debug
+      RUST_BACKTRACE: 1
+      # MongoDB and RabbitMQ
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      # Oxifed instances
+      SOLARM_URL: http://domainservd-solarm:8080
+      SPACE_URL: http://domainservd-space:8080
+      AOPC_URL: http://domainservd-aopc:8080
+      # Other ActivityPub implementations
+      SNAC_URL: http://snac:8080
+      MITRA_URL: http://mitra:8080
+      # Test configuration
+      TEST_INTEROP: "true"
+    depends_on:
+      domainservd-solarm:
+        condition: service_healthy
+      domainservd-space:
+        condition: service_healthy
+      domainservd-aopc:
+        condition: service_healthy
+      snac:
+        condition: service_healthy
+      mitra:
+        condition: service_healthy
+      publisherd-solarm:
+        condition: service_started
+      publisherd-space:
+        condition: service_started
+      publisherd-aopc:
+        condition: service_started
+    networks:
+      - oxifed-interop
+    volumes:
+      - ./test-results:/test-results
+      - ../tests:/app/tests:ro
+    command: ["cargo", "test", "--test", "e2e_interop", "--", "--nocapture", "--test-threads=1"]
+
+  # Nginx reverse proxy for proper domain routing (optional but recommended)
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-interop
+    volumes:
+      - ./nginx.interop.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - domainservd-solarm
+      - domainservd-space
+      - domainservd-aopc
+      - snac
+      - mitra
+    networks:
+      - oxifed-interop
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  oxifed-interop:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  mongodb-interop-data:
+  rabbitmq-interop-data:
+  postgres-mitra-data:
+  snac-data:
+  mitra-data:
+  mitra-static:

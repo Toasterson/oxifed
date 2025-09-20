@@ -1,0 +1,230 @@
+version: '3.8'
+
+services:
+  # Shared Infrastructure
+  mongodb:
+    image: mongo:8
+    container_name: mongodb-e2e
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: testpassword
+      MONGO_INITDB_DATABASE: oxifed
+    ports:
+      - "27017:27017"
+    networks:
+      - oxifed-e2e
+    volumes:
+      - mongodb-e2e-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: cloudamqp/lavinmq:latest
+    container_name: rabbitmq-e2e
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: testpassword
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - oxifed-e2e
+    volumes:
+      - rabbitmq-e2e-data:/var/lib/lavinmq
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:15672"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Domain 1: social.solarm.org
+  domainservd-solarm:
+    build:
+      context: ..
+      dockerfile: docker/domainservd/Dockerfile
+    container_name: domainservd-solarm
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: social.solarm.org
+      DOMAIN_PORT: 8080
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      SERVER_NAME: social.solarm.org
+      BIND_ADDRESS: 0.0.0.0:8080
+    ports:
+      - "8081:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - oxifed-e2e
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Domain 2: solarm.space
+  domainservd-space:
+    build:
+      context: ..
+      dockerfile: docker/domainservd/Dockerfile
+    container_name: domainservd-space
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: solarm.space
+      DOMAIN_PORT: 8080
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      SERVER_NAME: solarm.space
+      BIND_ADDRESS: 0.0.0.0:8080
+    ports:
+      - "8082:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - oxifed-e2e
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Domain 3: social.aopc.cloud
+  domainservd-aopc:
+    build:
+      context: ..
+      dockerfile: docker/domainservd/Dockerfile
+    container_name: domainservd-aopc
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: social.aopc.cloud
+      DOMAIN_PORT: 8080
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      SERVER_NAME: social.aopc.cloud
+      BIND_ADDRESS: 0.0.0.0:8080
+    ports:
+      - "8083:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - oxifed-e2e
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Publisher services for each domain
+  publisherd-solarm:
+    build:
+      context: ..
+      dockerfile: docker/publisherd/Dockerfile
+    container_name: publisherd-solarm
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: social.solarm.org
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      domainservd-solarm:
+        condition: service_healthy
+    networks:
+      - oxifed-e2e
+
+  publisherd-space:
+    build:
+      context: ..
+      dockerfile: docker/publisherd/Dockerfile
+    container_name: publisherd-space
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: solarm.space
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      domainservd-space:
+        condition: service_healthy
+    networks:
+      - oxifed-e2e
+
+  publisherd-aopc:
+    build:
+      context: ..
+      dockerfile: docker/publisherd/Dockerfile
+    container_name: publisherd-aopc
+    environment:
+      RUST_LOG: debug
+      DOMAIN_NAME: social.aopc.cloud
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      domainservd-aopc:
+        condition: service_healthy
+    networks:
+      - oxifed-e2e
+
+  # Test runner service
+  test-runner:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.test
+    container_name: e2e-test-runner
+    environment:
+      RUST_LOG: debug
+      RUST_BACKTRACE: 1
+      MONGODB_URI: mongodb://root:testpassword@mongodb:27017/oxifed?authSource=admin
+      AMQP_URI: amqp://admin:testpassword@rabbitmq:5672
+      SOLARM_URL: http://domainservd-solarm:8080
+      SPACE_URL: http://domainservd-space:8080
+      AOPC_URL: http://domainservd-aopc:8080
+    depends_on:
+      domainservd-solarm:
+        condition: service_healthy
+      domainservd-space:
+        condition: service_healthy
+      domainservd-aopc:
+        condition: service_healthy
+      publisherd-solarm:
+        condition: service_started
+      publisherd-space:
+        condition: service_started
+      publisherd-aopc:
+        condition: service_started
+    networks:
+      - oxifed-e2e
+    volumes:
+      - ./test-results:/test-results
+    command: ["cargo", "test", "--test", "e2e_federation", "--", "--nocapture", "--test-threads=1"]
+
+networks:
+  oxifed-e2e:
+    driver: bridge
+
+volumes:
+  mongodb-e2e-data:
+  rabbitmq-e2e-data:

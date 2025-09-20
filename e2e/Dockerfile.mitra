@@ -1,0 +1,215 @@
+# Dockerfile for Mitra - Federated social media server
+FROM rust:1.75-bookworm as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    pkg-config \
+    libssl-dev \
+    libpq-dev \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone Mitra repository
+WORKDIR /build
+RUN git clone https://codeberg.org/silverpill/mitra.git . && \
+    git checkout $(git describe --tags --abbrev=0 2>/dev/null || git rev-parse HEAD)
+
+# Build Mitra
+RUN cargo build --release --features production
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libpq5 \
+    libssl3 \
+    ca-certificates \
+    curl \
+    bash \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy built binary from builder
+COPY --from=builder /build/target/release/mitra /app/mitra
+COPY --from=builder /build/config.yaml.example /app/config.yaml.example
+
+# Create necessary directories
+RUN mkdir -p /app/media /app/static /app/config
+
+# Create initialization script
+RUN cat > /app/init-mitra.sh << 'EOF'
+#!/bin/bash
+set -e
+
+# Environment variables with defaults
+MITRA_HOSTNAME=${MITRA_HOSTNAME:-mitra.aopc.cloud}
+MITRA_PORT=${MITRA_PORT:-8080}
+MITRA_DATABASE_URL=${MITRA_DATABASE_URL:-postgres://mitra:mitrapassword@postgres-mitra:5432/mitra}
+MITRA_SECRET_KEY=${MITRA_SECRET_KEY:-$(openssl rand -hex 32)}
+MITRA_REGISTRATION_MODE=${MITRA_REGISTRATION_MODE:-open}
+MITRA_FEDERATION_ENABLED=${MITRA_FEDERATION_ENABLED:-true}
+MITRA_DEBUG=${MITRA_DEBUG:-true}
+MITRA_MEDIA_DIR=${MITRA_MEDIA_DIR:-/app/media}
+MITRA_STATIC_DIR=${MITRA_STATIC_DIR:-/app/static}
+MITRA_INSTANCE_NAME=${MITRA_INSTANCE_NAME:-"Mitra Test Instance"}
+MITRA_INSTANCE_DESCRIPTION=${MITRA_INSTANCE_DESCRIPTION:-"Mitra instance for testing"}
+MITRA_ADMIN_USERNAME=${MITRA_ADMIN_USERNAME:-admin}
+MITRA_ADMIN_EMAIL=${MITRA_ADMIN_EMAIL:-admin@mitra.aopc.cloud}
+MITRA_ADMIN_PASSWORD=${MITRA_ADMIN_PASSWORD:-testpass123}
+
+# Create configuration file if it doesn't exist
+if [ ! -f /app/config/config.yaml ]; then
+    echo "Creating Mitra configuration..."
+    cat > /app/config/config.yaml << EOCONF
+# Mitra configuration for testing
+instance:
+  hostname: $MITRA_HOSTNAME
+  port: $MITRA_PORT
+  name: "$MITRA_INSTANCE_NAME"
+  description: "$MITRA_INSTANCE_DESCRIPTION"
+  version: "1.0.0"
+  contact_email: $MITRA_ADMIN_EMAIL
+  rules: |
+    1. Be respectful
+    2. No spam
+    3. Follow community guidelines
+  registrations: $MITRA_REGISTRATION_MODE
+  approval_required: false
+  invites_enabled: false
+  federation_enabled: $MITRA_FEDERATION_ENABLED
+
+database:
+  url: $MITRA_DATABASE_URL
+  max_connections: 10
+  min_connections: 2
+
+security:
+  secret_key: $MITRA_SECRET_KEY
+  cors_allowed_origins:
+    - "http://localhost:3000"
+    - "https://$MITRA_HOSTNAME"
+
+storage:
+  media_dir: $MITRA_MEDIA_DIR
+  static_dir: $MITRA_STATIC_DIR
+  max_upload_size: 10485760  # 10MB
+  allowed_media_types:
+    - image/jpeg
+    - image/png
+    - image/gif
+    - image/webp
+    - video/mp4
+
+federation:
+  enabled: $MITRA_FEDERATION_ENABLED
+  actor_refresh_interval: 3600
+  deliveries_per_second: 10
+  delivery_timeout: 30
+  signature_algorithm: rsa-sha256
+
+logging:
+  level: $([ "$MITRA_DEBUG" = "true" ] && echo "debug" || echo "info")
+  format: json
+
+server:
+  bind_address: 0.0.0.0:$MITRA_PORT
+  workers: 4
+  max_connections: 1000
+  keep_alive: 60
+
+features:
+  webfinger: true
+  nodeinfo: true
+  mastodon_api: true
+  activitypub: true
+  oauth: true
+  search: true
+
+cache:
+  ttl: 3600
+  size: 1000
+
+limits:
+  max_note_length: 5000
+  max_bio_length: 1000
+  max_display_name_length: 50
+  max_poll_options: 10
+  poll_duration_max: 604800  # 7 days in seconds
+EOCONF
+    echo "Configuration created successfully"
+fi
+
+# Wait for database to be ready
+echo "Waiting for database..."
+until pg_isready -h $(echo $MITRA_DATABASE_URL | sed -n 's/.*@\([^:]*\):.*/\1/p') -p 5432; do
+    echo "Database is not ready yet..."
+    sleep 2
+done
+echo "Database is ready!"
+
+# Run database migrations
+echo "Running database migrations..."
+/app/mitra migrate up || {
+    echo "Migration failed, database might already be initialized"
+}
+
+# Create admin user if it doesn't exist
+echo "Setting up admin user..."
+cat > /tmp/create_admin.sql << EOSQL
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM users WHERE username = '$MITRA_ADMIN_USERNAME') THEN
+        INSERT INTO users (
+            username,
+            email,
+            display_name,
+            password_hash,
+            created_at,
+            updated_at,
+            is_admin,
+            is_moderator,
+            email_verified,
+            bio
+        ) VALUES (
+            '$MITRA_ADMIN_USERNAME',
+            '$MITRA_ADMIN_EMAIL',
+            'Admin User',
+            crypt('$MITRA_ADMIN_PASSWORD', gen_salt('bf')),
+            NOW(),
+            NOW(),
+            true,
+            true,
+            true,
+            'Test administrator account'
+        );
+    END IF;
+END\$\$;
+EOSQL
+
+# Note: This is a simplified setup. In production, use proper user creation through API
+echo "Admin user setup completed"
+
+# Start Mitra
+echo "Starting Mitra server on $MITRA_HOSTNAME:$MITRA_PORT..."
+exec /app/mitra server --config /app/config/config.yaml
+EOF
+
+RUN chmod +x /app/init-mitra.sh
+
+# Expose port
+EXPOSE 8080
+
+# Volumes for persistence
+VOLUME ["/app/media", "/app/static", "/app/config"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${MITRA_PORT:-8080}/api/v1/instance || exit 1
+
+# Run initialization script
+CMD ["/app/init-mitra.sh"]

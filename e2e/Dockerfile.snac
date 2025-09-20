@@ -1,0 +1,126 @@
+# Dockerfile for snac - Simple ActivityPub server
+FROM alpine:3.18
+
+# Install build dependencies and runtime requirements
+RUN apk add --no-cache \
+    git \
+    gcc \
+    musl-dev \
+    make \
+    curl \
+    openssl-dev \
+    libressl-dev \
+    ca-certificates \
+    bash
+
+# Set working directory
+WORKDIR /build
+
+# Clone snac2 repository
+RUN git clone https://codeberg.org/grunfink/snac2.git . && \
+    git checkout $(git describe --tags --abbrev=0)
+
+# Build snac
+RUN make && \
+    make install PREFIX=/usr/local
+
+# Create data directory
+RUN mkdir -p /data
+
+# Create a startup script
+RUN cat > /usr/local/bin/snac-init.sh << 'EOF'
+#!/bin/bash
+set -e
+
+# Environment variables
+SNAC_DOMAIN=${SNAC_DOMAIN:-snac.aopc.cloud}
+SNAC_PORT=${SNAC_PORT:-8080}
+SNAC_ADMIN_USER=${SNAC_ADMIN_USER:-admin}
+SNAC_ADMIN_EMAIL=${SNAC_ADMIN_EMAIL:-admin@snac.aopc.cloud}
+SNAC_DATA_DIR=${SNAC_DATA_DIR:-/data}
+
+# Create snac data directory structure
+mkdir -p "$SNAC_DATA_DIR"
+cd "$SNAC_DATA_DIR"
+
+# Initialize snac instance if not already done
+if [ ! -f "$SNAC_DATA_DIR/server.json" ]; then
+    echo "Initializing snac instance..."
+
+    # Create server configuration
+    cat > "$SNAC_DATA_DIR/server.json" << EOCFG
+{
+    "host": "$SNAC_DOMAIN",
+    "prefix": "https://$SNAC_DOMAIN",
+    "address": "0.0.0.0",
+    "port": $SNAC_PORT,
+    "layout": 2,
+    "dbglevel": ${SNAC_DEBUG:-1},
+    "queue_retry_minutes": 2,
+    "queue_retry_max": 10,
+    "cssurls": [],
+    "max_timeline_entries": 128,
+    "timeline_purge_days": 365,
+    "local_purge_days": 0,
+    "admin_account": "$SNAC_ADMIN_USER@$SNAC_DOMAIN",
+    "admin_email": "$SNAC_ADMIN_EMAIL",
+    "disabled": false
+}
+EOCFG
+
+    # Create admin user
+    mkdir -p "$SNAC_DATA_DIR/user/$SNAC_ADMIN_USER"
+
+    # Generate a simple password hash (for testing only)
+    # In production, use proper password hashing
+    ADMIN_PASSWORD=${SNAC_ADMIN_PASSWORD:-testpass123}
+
+    cat > "$SNAC_DATA_DIR/user/$SNAC_ADMIN_USER/user.json" << EOUSER
+{
+    "uid": "$SNAC_ADMIN_USER",
+    "name": "Admin User",
+    "email": "$SNAC_ADMIN_EMAIL",
+    "bio": "Test admin account for snac instance",
+    "published": "$(date -Iseconds)",
+    "password": "$ADMIN_PASSWORD",
+    "following": [],
+    "followers": [],
+    "muted": [],
+    "hidden": [],
+    "ignored": [],
+    "limited": [],
+    "lists": {},
+    "pinned": [],
+    "tagged": [],
+    "header": "",
+    "avatar": "",
+    "metadata": {},
+    "automated": false,
+    "bot": false,
+    "public": true,
+    "private": false
+}
+EOUSER
+
+    echo "snac instance initialized successfully"
+fi
+
+# Start snac server
+echo "Starting snac server on $SNAC_DOMAIN:$SNAC_PORT..."
+exec /usr/local/bin/snac httpd "$SNAC_DATA_DIR"
+EOF
+
+RUN chmod +x /usr/local/bin/snac-init.sh
+
+# Expose port
+EXPOSE 8080
+
+# Volume for data persistence
+VOLUME ["/data"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:${SNAC_PORT:-8080}/health || exit 1
+
+# Run snac
+CMD ["/usr/local/bin/snac-init.sh"]
