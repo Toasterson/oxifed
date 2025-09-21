@@ -615,7 +615,7 @@ async fn handle_key_command_messaging(client: &LavinMQClient, command: &KeyComma
 
             // Create and send key generation message
             let key_gen_message =
-                KeyGenerateMessage::new(actor.clone(), algorithm.clone(), key_size.clone());
+                KeyGenerateMessage::new(actor.clone(), algorithm.clone(), *key_size);
 
             client.publish_message(&key_gen_message).await?;
             println!("Key generation request sent to PKI service");

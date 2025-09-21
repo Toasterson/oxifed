@@ -920,11 +920,11 @@ async fn handle_accept_activity(
     activity: &oxifed::Activity,
 ) -> Result<(), RabbitMQError> {
     // Check if this is accepting a Follow activity
-    if let Some(oxifed::ObjectOrLink::Object(follow_obj)) = &activity.object {
-        if follow_obj.object_type == oxifed::ObjectType::Activity {
+    if let Some(oxifed::ObjectOrLink::Object(follow_obj)) = &activity.object
+        && follow_obj.object_type == oxifed::ObjectType::Activity {
             // This is accepting a Follow activity
-            if let Some(follow_actor) = &follow_obj.additional_properties.get("actor") {
-                if let Some(follow_target) = &follow_obj.additional_properties.get("object") {
+            if let Some(follow_actor) = &follow_obj.additional_properties.get("actor")
+                && let Some(follow_target) = &follow_obj.additional_properties.get("object") {
                     if let (
                         serde_json::Value::String(follower_id),
                         serde_json::Value::String(target_id),
@@ -932,9 +932,7 @@ async fn handle_accept_activity(
                     {
                         return add_follower_relationship(db, follower_id, target_id).await;
                     }
-                }
             }
-        }
     }
 
     info!("Accept activity processed (not a follow accept)");
@@ -1226,7 +1224,7 @@ async fn delete_note_object(
         )))
     })?;
 
-    if !does_domain_exist(&domain, db).await {
+    if !does_domain_exist(domain, db).await {
         return Err(RabbitMQError::DomainNotFound(domain.to_string()));
     }
 

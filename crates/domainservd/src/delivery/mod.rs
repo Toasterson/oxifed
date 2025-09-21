@@ -141,10 +141,9 @@ impl DeliveryManager {
             });
 
             // Limit concurrent deliveries
-            if delivery_futures.len() >= MAX_CONCURRENT_DELIVERIES {
-                if let Some(result) = delivery_futures.next().await {
+            if delivery_futures.len() >= MAX_CONCURRENT_DELIVERIES
+                && let Some(result) = delivery_futures.next().await {
                     Self::update_stats(&mut stats, result);
-                }
             }
         }
 
@@ -345,11 +344,10 @@ impl DeliveryManager {
             match item {
                 ObjectOrLink::Url(url) => {
                     // Fetch actor and get their inbox
-                    if let Ok(actor) = self.client.fetch_actor(&url).await {
-                        if let Some(Value::String(inbox)) = actor.additional_properties.get("inbox")
-                        {
-                            recipients.insert(inbox.clone());
-                        }
+                    if let Ok(actor) = self.client.fetch_actor(url).await
+                        && let Some(Value::String(inbox)) = actor.additional_properties.get("inbox")
+                    {
+                        recipients.insert(inbox.clone());
                     }
                 }
                 ObjectOrLink::Object(obj) => {
@@ -367,10 +365,9 @@ impl DeliveryManager {
     fn extract_username_from_url(&self, url: &str) -> Option<String> {
         if let Ok(parsed_url) = Url::parse(url) {
             let path = parsed_url.path();
-            if let Ok(re) = regex::Regex::new(r"/u/([^/]+)/") {
-                if let Some(captures) = re.captures(path) {
+            if let Ok(re) = regex::Regex::new(r"/u/([^/]+)/")
+                && let Some(captures) = re.captures(path) {
                     return captures.get(1).map(|m| m.as_str().to_string());
-                }
             }
         }
         None

@@ -22,15 +22,15 @@ use uuid::Uuid;
 pub enum MessagingError {
     /// LavinMQ connection error
     #[error("LavinMQ connection error: {0}")]
-    ConnectionError(#[from] lapin::Error),
+    Connection(#[from] lapin::Error),
 
     /// JSON serialization error
     #[error("JSON serialization error: {0}")]
-    SerializationError(#[from] serde_json::Error),
+    Serialization(#[from] serde_json::Error),
 
     /// Message confirmation error
     #[error("Message was not confirmed by broker")]
-    ConfirmationError,
+    Confirmation,
 }
 
 impl From<MessagingError> for miette::Error {
@@ -210,16 +210,16 @@ impl RpcClient {
                         }
                     }
                     Err(e) => {
-                        return Err(MessagingError::ConnectionError(e));
+                        return Err(MessagingError::Connection(e));
                     }
                 }
             }
-            Err(MessagingError::ConfirmationError)
+            Err(MessagingError::Confirmation)
         })
         .await
         {
             Ok(result) => result,
-            Err(_) => Err(MessagingError::ConfirmationError), // Timeout
+            Err(_) => Err(MessagingError::Confirmation), // Timeout
         }
     }
 
@@ -233,9 +233,9 @@ impl RpcClient {
         match response.result {
             oxifed::messaging::DomainRpcResult::DomainList { domains } => Ok(domains),
             oxifed::messaging::DomainRpcResult::Error { message: _ } => {
-                Err(MessagingError::ConfirmationError) // Convert to appropriate error
+                Err(MessagingError::Confirmation) // Convert to appropriate error
             }
-            _ => Err(MessagingError::ConfirmationError),
+            _ => Err(MessagingError::Confirmation),
         }
     }
 
@@ -252,9 +252,9 @@ impl RpcClient {
         match response.result {
             oxifed::messaging::DomainRpcResult::DomainDetails { domain } => Ok(*domain),
             oxifed::messaging::DomainRpcResult::Error { message: _ } => {
-                Err(MessagingError::ConfirmationError) // Convert to appropriate error
+                Err(MessagingError::Confirmation) // Convert to appropriate error
             }
-            _ => Err(MessagingError::ConfirmationError),
+            _ => Err(MessagingError::Confirmation),
         }
     }
 }

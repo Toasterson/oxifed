@@ -9,7 +9,6 @@ use lapin::{
 };
 use oxifed::messaging::EXCHANGE_ACTIVITYPUB_PUBLISH;
 use oxifed::{Activity, client::ActivityPubClient};
-use serde_json;
 
 use thiserror::Error;
 use tokio::signal;
@@ -74,7 +73,7 @@ impl PublisherDaemon {
             Connection::connect(&config.amqp_url, ConnectionProperties::default()).await?;
 
         let client =
-            oxifed::client::ActivityPubClient::new().map_err(|e| PublisherError::ClientError(e))?;
+            oxifed::client::ActivityPubClient::new().map_err(PublisherError::ClientError)?;
 
         Ok(Self {
             config,
@@ -381,13 +380,12 @@ impl PublisherDaemon {
             }
             serde_json::Value::Array(arr) => {
                 for item in arr {
-                    if let serde_json::Value::String(url_str) = item {
-                        if let Ok(url) = Url::parse(url_str) {
+                    if let serde_json::Value::String(url_str) = item
+                        && let Ok(url) = Url::parse(url_str) {
                             // Only include HTTP/HTTPS URLs for actual delivery
                             if url.scheme() == "http" || url.scheme() == "https" {
                                 recipients.push(url);
                             }
-                        }
                     }
                 }
             }
