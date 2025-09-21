@@ -498,7 +498,8 @@ impl ActivityPubTestHelper {
                             .and_then(|v| v.as_array())
                         {
                             for item in items {
-                                if item.get("type").and_then(|v| v.as_str()) == Some(activity_type) {
+                                if item.get("type").and_then(|v| v.as_str()) == Some(activity_type)
+                                {
                                     return Ok(true);
                                 }
                             }
