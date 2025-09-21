@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
-use tracing_subscriber;
 use uuid::Uuid;
 
 // Import oxifed messaging types
@@ -370,12 +369,11 @@ impl E2ETestHelper {
         // Check if the inbox contains a note with the expected content
         if let Some(items) = inbox_items.get("orderedItems").and_then(|v| v.as_array()) {
             for item in items {
-                if let Some(object) = item.get("object") {
-                    if let Some(content) = object.get("content").and_then(|v| v.as_str()) {
-                        if content.contains(expected_content) {
-                            return Ok(true);
-                        }
-                    }
+                if let Some(object) = item.get("object")
+                    && let Some(content) = object.get("content").and_then(|v| v.as_str())
+                    && content.contains(expected_content)
+                {
+                    return Ok(true);
                 }
             }
         }
@@ -910,7 +908,6 @@ async fn test_message_federation_reliability() {
 
     info!("✅ Message federation reliability test passed");
 }
-
 
 // Helper to decide if E2E tests should run. Set OXIFED_RUN_E2E=1 (or true) to enable.
 fn should_run_e2e() -> bool {

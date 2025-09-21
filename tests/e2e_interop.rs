@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::time::sleep;
 use tracing::{info, warn};
-use tracing_subscriber;
 use uuid::Uuid;
 
 // Test configuration for interop testing
@@ -701,7 +700,7 @@ async fn test_comprehensive_interop_scenario() {
     // 4. Each creates a post
     // 5. Verify cross-implementation delivery
 
-    let test_implementations = vec![
+    let test_implementations = [
         (
             Implementation::Oxifed,
             &helper.config.solarm_url,
@@ -866,7 +865,6 @@ async fn test_error_handling_interop() {
 
     info!("✅ Error handling interop test completed");
 }
-
 
 // Helper to decide if E2E tests should run. Set OXIFED_RUN_E2E=1 (or true) to enable.
 fn should_run_e2e() -> bool {

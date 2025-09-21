@@ -612,7 +612,9 @@ impl DomainRpcResponse {
     pub fn domain_details(request_id: String, domain: Option<DomainInfo>) -> Self {
         Self {
             request_id,
-            result: DomainRpcResult::DomainDetails { domain: Box::new(domain) },
+            result: DomainRpcResult::DomainDetails {
+                domain: Box::new(domain),
+            },
         }
     }
 

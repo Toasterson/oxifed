@@ -96,14 +96,15 @@ async fn handle_webfinger(
 
     // Filter relations if requested
     if let Some(relations) = &query.relations
-        && let Some(links) = &mut jrd.links {
-            jrd.links = Some(
-                links
-                    .iter()
-                    .filter(|link| relations.contains(&link.rel))
-                    .cloned()
-                    .collect(),
-            );
+        && let Some(links) = &mut jrd.links
+    {
+        jrd.links = Some(
+            links
+                .iter()
+                .filter(|link| relations.contains(&link.rel))
+                .cloned()
+                .collect(),
+        );
     }
 
     Ok(Json(jrd))

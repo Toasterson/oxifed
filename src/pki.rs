@@ -486,19 +486,20 @@ impl PkiManager {
 
         // Add domain key link if exists
         if let Some(domain_sig) = &user_key.domain_signature
-            && let Some(domain_key) = self.domain_keys.get(&domain_sig.domain) {
-                let domain_link = TrustChainLink {
-                    level: "domain".to_string(),
-                    key_id: domain_key.key_id.clone(),
-                    signed_by: domain_key
-                        .master_signature
-                        .as_ref()
-                        .map(|ms| ms.master_key_id.clone()),
-                    signed_at: domain_key.master_signature.as_ref().map(|ms| ms.signed_at),
-                    self_signed: domain_key.master_signature.is_none(),
-                    created_at: domain_key.created_at,
-                };
-                chain.push(domain_link);
+            && let Some(domain_key) = self.domain_keys.get(&domain_sig.domain)
+        {
+            let domain_link = TrustChainLink {
+                level: "domain".to_string(),
+                key_id: domain_key.key_id.clone(),
+                signed_by: domain_key
+                    .master_signature
+                    .as_ref()
+                    .map(|ms| ms.master_key_id.clone()),
+                signed_at: domain_key.master_signature.as_ref().map(|ms| ms.signed_at),
+                self_signed: domain_key.master_signature.is_none(),
+                created_at: domain_key.created_at,
+            };
+            chain.push(domain_link);
         }
 
         // Add master key link if exists
@@ -539,14 +540,15 @@ impl PkiManager {
         // Verify each link in the chain
         for link in trust_chain.verification_chain.iter() {
             if !link.self_signed
-                && let Some(signer_key_id) = &link.signed_by {
-                    // Verify signature exists and is valid
-                    // This would involve cryptographic verification in a real implementation
-                    tracing::debug!(
-                        "Verifying signature from {} for {}",
-                        signer_key_id,
-                        link.key_id
-                    );
+                && let Some(signer_key_id) = &link.signed_by
+            {
+                // Verify signature exists and is valid
+                // This would involve cryptographic verification in a real implementation
+                tracing::debug!(
+                    "Verifying signature from {} for {}",
+                    signer_key_id,
+                    link.key_id
+                );
             }
         }
 

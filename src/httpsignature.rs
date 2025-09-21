@@ -653,8 +653,9 @@ impl HttpSignature {
 
         // Check for expiration
         if let Some(expires) = signature.parameters.expires
-            && expires < Utc::now() {
-                return Err(SignatureError::SignatureExpired);
+            && expires < Utc::now()
+        {
+            return Err(SignatureError::SignatureExpired);
         }
 
         // Check key ID if expected

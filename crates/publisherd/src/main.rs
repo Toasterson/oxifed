@@ -381,11 +381,13 @@ impl PublisherDaemon {
             serde_json::Value::Array(arr) => {
                 for item in arr {
                     if let serde_json::Value::String(url_str) = item
-                        && let Ok(url) = Url::parse(url_str) {
-                            // Only include HTTP/HTTPS URLs for actual delivery
-                            if url.scheme() == "http" || url.scheme() == "https" {
-                                recipients.push(url);
-                            }
+                        && let Ok(url) = Url::parse(url_str)
+                    {
+                        // Only include HTTP/HTTPS URLs for actual delivery
+                        let scheme = url.scheme();
+                        if scheme == "http" || scheme == "https" {
+                            recipients.push(url.clone());
+                        }
                     }
                 }
             }

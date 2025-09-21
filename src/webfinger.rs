@@ -186,15 +186,12 @@ impl WebFingerClient {
 
             // For acct:user@example.com, return example.com
             // Handle potential additional parts like acct:user@example.com:port/path
-            let domain = parts[1]
-                .split([':', '/'])
-                .next()
-                .ok_or_else(|| {
-                    WebFingerError::HostExtractionFailed(format!(
-                        "Could not extract domain from acct URI: {}",
-                        resource
-                    ))
-                })?;
+            let domain = parts[1].split([':', '/']).next().ok_or_else(|| {
+                WebFingerError::HostExtractionFailed(format!(
+                    "Could not extract domain from acct URI: {}",
+                    resource
+                ))
+            })?;
 
             Ok(domain.to_string())
         } else if resource.starts_with("http:") || resource.starts_with("https:") {
@@ -217,7 +214,9 @@ impl WebFingerClient {
 }
 
 impl Default for WebFingerClient {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]

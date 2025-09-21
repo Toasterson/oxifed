@@ -8,7 +8,6 @@ use oxifed::messaging::{
     DomainInfo, DomainRpcRequest, DomainRpcRequestType, DomainRpcResponse, DomainRpcResult,
     Message, MessageEnum,
 };
-use serde_json;
 use uuid::Uuid;
 
 /// Simulate the complete RPC workflow for list domains
@@ -96,13 +95,13 @@ fn test_complete_list_domains_rpc_workflow() {
         assert_eq!(domains[0].domain, "example1.com");
         assert_eq!(domains[0].name, Some("Example 1".to_string()));
         assert_eq!(domains[0].registration_mode, "Approval");
-        assert_eq!(domains[0].authorized_fetch, true);
+        assert!(domains[0].authorized_fetch);
 
         // Verify second domain
         assert_eq!(domains[1].domain, "example2.com");
         assert_eq!(domains[1].name, Some("Example 2".to_string()));
         assert_eq!(domains[1].registration_mode, "Open");
-        assert_eq!(domains[1].authorized_fetch, false);
+        assert!(!domains[1].authorized_fetch);
     } else {
         panic!("Expected DomainList result");
     }
@@ -179,7 +178,7 @@ fn test_complete_get_domain_rpc_workflow() {
         assert_eq!(domain_info.domain, domain_name);
         assert_eq!(domain_info.name, Some("Specific Domain".to_string()));
         assert_eq!(domain_info.registration_mode, "Invite");
-        assert_eq!(domain_info.authorized_fetch, true);
+        assert!(domain_info.authorized_fetch);
         assert_eq!(domain_info.max_note_length, Some(2000));
         assert_eq!(domain_info.max_file_size, Some(52428800));
         assert_eq!(domain_info.allowed_file_types.as_ref().unwrap().len(), 4);

@@ -7,7 +7,6 @@ use oxifed::messaging::{
     DomainInfo, DomainRpcRequest, DomainRpcRequestType, DomainRpcResponse, DomainRpcResult,
     Message, MessageEnum,
 };
-use serde_json;
 use uuid::Uuid;
 
 #[test]

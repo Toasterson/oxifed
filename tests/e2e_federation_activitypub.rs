@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::time::sleep;
 use tracing::info;
-use tracing_subscriber;
 use uuid::Uuid;
 
 // Test configuration
@@ -472,6 +471,7 @@ impl ActivityPubTestHelper {
         }
     }
 
+    #[allow(clippy::collapsible_if)]
     async fn check_activity_in_inbox(
         &self,
         inbox_url: &str,
@@ -489,7 +489,8 @@ impl ActivityPubTestHelper {
                 .await;
 
             if let Ok(resp) = response {
-                if resp.status().is_success() {
+                let status_ok = resp.status().is_success();
+                if status_ok {
                     if let Ok(inbox) = resp.json::<Value>().await {
                         if let Some(items) = inbox
                             .get("orderedItems")
@@ -497,8 +498,7 @@ impl ActivityPubTestHelper {
                             .and_then(|v| v.as_array())
                         {
                             for item in items {
-                                if item.get("type").and_then(|v| v.as_str()) == Some(activity_type)
-                                {
+                                if item.get("type").and_then(|v| v.as_str()) == Some(activity_type) {
                                     return Ok(true);
                                 }
                             }
@@ -1304,7 +1304,6 @@ async fn test_comprehensive_activitypub_workflow() {
     info!("✅ Comprehensive ActivityPub workflow test passed!");
     info!("Successfully tested: Follow, Accept, Reject, Like, Announce, Reply, and Undo");
 }
-
 
 // Helper to decide if E2E tests should run. Set OXIFED_RUN_E2E=1 (or true) to enable.
 fn should_run_e2e() -> bool {

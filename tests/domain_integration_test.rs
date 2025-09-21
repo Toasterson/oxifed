@@ -7,7 +7,6 @@ use oxifed::messaging::{
     DomainCreateMessage, DomainDeleteMessage, DomainInfo, DomainRpcRequest, DomainRpcRequestType,
     DomainRpcResponse, DomainRpcResult, DomainUpdateMessage, Message, MessageEnum,
 };
-use serde_json;
 use uuid::Uuid;
 
 #[test]
@@ -103,7 +102,7 @@ fn test_rpc_request_response_workflow() {
             assert_eq!(domains.len(), 1);
             assert_eq!(domains[0].domain, "test.example");
             assert_eq!(domains[0].name, Some("Test Domain".to_string()));
-            assert_eq!(domains[0].authorized_fetch, true);
+            assert!(domains[0].authorized_fetch);
         } else {
             panic!("Expected DomainList result");
         }
@@ -167,7 +166,7 @@ fn test_get_domain_rpc_workflow() {
             let domain_info = domain.unwrap();
             assert_eq!(domain_info.domain, domain_name);
             assert_eq!(domain_info.registration_mode, "Open");
-            assert_eq!(domain_info.authorized_fetch, false);
+            assert!(!domain_info.authorized_fetch);
             assert_eq!(domain_info.max_note_length, Some(1000));
         } else {
             panic!("Expected DomainDetails result");
@@ -253,7 +252,7 @@ fn test_domain_info_comprehensive_fields() {
         Some("Comprehensive Test Domain".to_string())
     );
     assert_eq!(deserialized_domain.registration_mode, "Invite");
-    assert_eq!(deserialized_domain.authorized_fetch, true);
+    assert!(deserialized_domain.authorized_fetch);
     assert_eq!(deserialized_domain.max_note_length, Some(2000));
     assert_eq!(deserialized_domain.max_file_size, Some(52428800));
     assert_eq!(

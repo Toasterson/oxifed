@@ -6,7 +6,6 @@
 use oxifed::messaging::{
     DomainCreateMessage, DomainDeleteMessage, DomainUpdateMessage, Message, MessageEnum,
 };
-use serde_json;
 
 #[test]
 fn test_domain_create_message_serialization() {
@@ -206,7 +205,7 @@ fn test_domain_delete_message_serialization() {
     let deserialized: MessageEnum = serde_json::from_str(&json).unwrap();
     if let MessageEnum::DomainDeleteMessage(domain_msg) = deserialized {
         assert_eq!(domain_msg.domain, "example.com");
-        assert_eq!(domain_msg.force, true);
+        assert!(domain_msg.force);
     } else {
         panic!("Expected DomainDeleteMessage");
     }

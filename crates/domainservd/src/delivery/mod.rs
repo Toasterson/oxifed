@@ -142,8 +142,9 @@ impl DeliveryManager {
 
             // Limit concurrent deliveries
             if delivery_futures.len() >= MAX_CONCURRENT_DELIVERIES
-                && let Some(result) = delivery_futures.next().await {
-                    Self::update_stats(&mut stats, result);
+                && let Some(result) = delivery_futures.next().await
+            {
+                Self::update_stats(&mut stats, result);
             }
         }
 
@@ -366,8 +367,9 @@ impl DeliveryManager {
         if let Ok(parsed_url) = Url::parse(url) {
             let path = parsed_url.path();
             if let Ok(re) = regex::Regex::new(r"/u/([^/]+)/")
-                && let Some(captures) = re.captures(path) {
-                    return captures.get(1).map(|m| m.as_str().to_string());
+                && let Some(captures) = re.captures(path)
+            {
+                return captures.get(1).map(|m| m.as_str().to_string());
             }
         }
         None

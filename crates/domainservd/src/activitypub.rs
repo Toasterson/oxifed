@@ -46,16 +46,18 @@ fn extract_domain_from_activity(activity: &Value) -> Option<String> {
     // Try to extract domain from actor field first
     if let Some(actor) = activity.get("actor").and_then(|v| v.as_str())
         && let Ok(url) = Url::parse(actor)
-        && let Some(host) = url.host_str() {
-            return Some(host.to_string());
-        }
+        && let Some(host) = url.host_str()
+    {
+        return Some(host.to_string());
+    }
 
     // Fallback to object field if actor doesn't have a valid URL
     if let Some(object) = activity.get("object").and_then(|v| v.as_str())
         && let Ok(url) = Url::parse(object)
-        && let Some(host) = url.host_str() {
-            return Some(host.to_string());
-        }
+        && let Some(host) = url.host_str()
+    {
+        return Some(host.to_string());
+    }
 
     // Try object.id if object is an embedded object
     if let Some(object_id) = activity
@@ -63,9 +65,10 @@ fn extract_domain_from_activity(activity: &Value) -> Option<String> {
         .and_then(|obj| obj.get("id"))
         .and_then(|id| id.as_str())
         && let Ok(url) = Url::parse(object_id)
-        && let Some(host) = url.host_str() {
-            return Some(host.to_string());
-        }
+        && let Some(host) = url.host_str()
+    {
+        return Some(host.to_string());
+    }
 
     None
 }
@@ -1096,9 +1099,7 @@ async fn handle_undo_activity(
                                     FollowStatus::Cancelled,
                                 )
                                 .await
-                                .map_err(|e| {
-                                    format!("Failed to update follow status: {}", e)
-                                })?;
+                                .map_err(|e| format!("Failed to update follow status: {}", e))?;
                         }
                     }
                     _ => {

@@ -924,10 +924,8 @@ async fn handle_accept_activity(
         && follow_obj.object_type == oxifed::ObjectType::Activity
         && let Some(follow_actor) = &follow_obj.additional_properties.get("actor")
         && let Some(follow_target) = &follow_obj.additional_properties.get("object")
-        && let (
-            serde_json::Value::String(follower_id),
-            serde_json::Value::String(target_id),
-        ) = (follow_actor, follow_target)
+        && let (serde_json::Value::String(follower_id), serde_json::Value::String(target_id)) =
+            (follow_actor, follow_target)
     {
         return add_follower_relationship(db, follower_id, target_id).await;
     }
@@ -1450,12 +1448,7 @@ async fn create_note_object(
 
     // Create a unique ID for this note
     let note_id_uuid = uuid::Uuid::new_v4();
-    let note_id = format!(
-        "https://{}/u/{}/notes/{}",
-        &domain,
-        &username,
-        note_id_uuid
-    );
+    let note_id = format!("https://{}/u/{}/notes/{}", &domain, &username, note_id_uuid);
 
     // Parse the note ID into a URL
     let _note_id_url = url::Url::parse(&note_id).map_err(RabbitMQError::URLParse)?;

@@ -192,21 +192,22 @@ impl RpcClient {
                 match delivery {
                     Ok(delivery) => {
                         if let Some(corr_id) = delivery.properties.correlation_id()
-                            && corr_id.as_str() == correlation_id {
-                                // Found our response
-                                if let Err(e) = delivery
-                                    .ack(lapin::options::BasicAckOptions::default())
-                                    .await
-                                {
-                                    tracing::warn!("Failed to ack RPC response: {}", e);
-                                }
-
-                                // Parse response (also wrapped in MessageEnum)
-                                let message: MessageEnum = serde_json::from_slice(&delivery.data)?;
-                                if let MessageEnum::DomainRpcResponse(response) = message {
-                                    return Ok(response);
-                                }
+                            && corr_id.as_str() == correlation_id
+                        {
+                            // Found our response
+                            if let Err(e) = delivery
+                                .ack(lapin::options::BasicAckOptions::default())
+                                .await
+                            {
+                                tracing::warn!("Failed to ack RPC response: {}", e);
                             }
+
+                            // Parse response (also wrapped in MessageEnum)
+                            let message: MessageEnum = serde_json::from_slice(&delivery.data)?;
+                            if let MessageEnum::DomainRpcResponse(response) = message {
+                                return Ok(response);
+                            }
+                        }
                     }
                     Err(e) => {
                         return Err(MessagingError::Connection(e));
