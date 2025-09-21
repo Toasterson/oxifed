@@ -921,18 +921,15 @@ async fn handle_accept_activity(
 ) -> Result<(), RabbitMQError> {
     // Check if this is accepting a Follow activity
     if let Some(oxifed::ObjectOrLink::Object(follow_obj)) = &activity.object
-        && follow_obj.object_type == oxifed::ObjectType::Activity {
-            // This is accepting a Follow activity
-            if let Some(follow_actor) = &follow_obj.additional_properties.get("actor")
-                && let Some(follow_target) = &follow_obj.additional_properties.get("object") {
-                    if let (
-                        serde_json::Value::String(follower_id),
-                        serde_json::Value::String(target_id),
-                    ) = (follow_actor, follow_target)
-                    {
-                        return add_follower_relationship(db, follower_id, target_id).await;
-                    }
-            }
+        && follow_obj.object_type == oxifed::ObjectType::Activity
+        && let Some(follow_actor) = &follow_obj.additional_properties.get("actor")
+        && let Some(follow_target) = &follow_obj.additional_properties.get("object")
+        && let (
+            serde_json::Value::String(follower_id),
+            serde_json::Value::String(target_id),
+        ) = (follow_actor, follow_target)
+    {
+        return add_follower_relationship(db, follower_id, target_id).await;
     }
 
     info!("Accept activity processed (not a follow accept)");
@@ -1325,7 +1322,7 @@ async fn update_note_object(
         )))
     })?;
 
-    if !does_domain_exist(&domain, db).await {
+    if !does_domain_exist(domain, db).await {
         return Err(RabbitMQError::DomainNotFound(domain.to_string()));
     }
 
@@ -1445,7 +1442,7 @@ async fn create_note_object(
     let actor = db
         .find_actor_by_id(&actor_id_str)
         .await
-        .map_err(|e| RabbitMQError::DbError(e))?;
+        .map_err(RabbitMQError::DbError)?;
 
     if actor.is_none() {
         return Err(RabbitMQError::ProfileNotFound(actor_id_str));
@@ -1457,11 +1454,11 @@ async fn create_note_object(
         "https://{}/u/{}/notes/{}",
         &domain,
         &username,
-        note_id_uuid.to_string()
+        note_id_uuid
     );
 
     // Parse the note ID into a URL
-    let _note_id_url = url::Url::parse(&note_id).map_err(|e| RabbitMQError::URLParse(e))?;
+    let _note_id_url = url::Url::parse(&note_id).map_err(RabbitMQError::URLParse)?;
 
     // Check if a note with this ID already exists
     let existing_note = db
@@ -1478,7 +1475,7 @@ async fn create_note_object(
     }
 
     // Parse the actor ID into a URL
-    let _actor_id_url = url::Url::parse(&actor_id_str).map_err(|e| RabbitMQError::URLParse(e))?;
+    let _actor_id_url = url::Url::parse(&actor_id_str).map_err(RabbitMQError::URLParse)?;
 
     let now = chrono::Utc::now();
 
@@ -1673,7 +1670,7 @@ async fn create_person_object(
     let existing_actor = db
         .find_actor_by_id(&actor_id)
         .await
-        .map_err(|e| RabbitMQError::DbError(e))?;
+        .map_err(RabbitMQError::DbError)?;
 
     if existing_actor.is_some() {
         error!("Actor with ID '{}' already exists", actor_id);

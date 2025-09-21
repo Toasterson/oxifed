@@ -95,8 +95,8 @@ async fn handle_webfinger(
     })?;
 
     // Filter relations if requested
-    if let Some(relations) = &query.relations {
-        if let Some(links) = &mut jrd.links {
+    if let Some(relations) = &query.relations
+        && let Some(links) = &mut jrd.links {
             jrd.links = Some(
                 links
                     .iter()
@@ -104,7 +104,6 @@ async fn handle_webfinger(
                     .cloned()
                     .collect(),
             );
-        }
     }
 
     Ok(Json(jrd))

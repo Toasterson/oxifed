@@ -45,18 +45,16 @@ use futures::TryStreamExt;
 fn extract_domain_from_activity(activity: &Value) -> Option<String> {
     // Try to extract domain from actor field first
     if let Some(actor) = activity.get("actor").and_then(|v| v.as_str())
-        && let Ok(url) = Url::parse(actor) {
-            if let Some(host) = url.host_str() {
-                return Some(host.to_string());
-            }
+        && let Ok(url) = Url::parse(actor)
+        && let Some(host) = url.host_str() {
+            return Some(host.to_string());
         }
 
     // Fallback to object field if actor doesn't have a valid URL
     if let Some(object) = activity.get("object").and_then(|v| v.as_str())
-        && let Ok(url) = Url::parse(object) {
-            if let Some(host) = url.host_str() {
-                return Some(host.to_string());
-            }
+        && let Ok(url) = Url::parse(object)
+        && let Some(host) = url.host_str() {
+            return Some(host.to_string());
         }
 
     // Try object.id if object is an embedded object
@@ -64,10 +62,9 @@ fn extract_domain_from_activity(activity: &Value) -> Option<String> {
         .get("object")
         .and_then(|obj| obj.get("id"))
         .and_then(|id| id.as_str())
-        && let Ok(url) = Url::parse(object_id) {
-            if let Some(host) = url.host_str() {
-                return Some(host.to_string());
-            }
+        && let Ok(url) = Url::parse(object_id)
+        && let Some(host) = url.host_str() {
+            return Some(host.to_string());
         }
 
     None
@@ -1077,35 +1074,35 @@ async fn handle_undo_activity(
     match object {
         oxifed::ObjectOrLink::Object(obj) => {
             // Handle embedded objects - check additional_properties for type
-            if let Some(type_val) = obj.additional_properties.get("type") {
-                if let Some(object_type) = type_val.as_str() {
-                    match object_type {
-                        "Follow" => {
-                            // Extract target from embedded follow object
-                            if let Some(target) = obj.additional_properties.get("object") {
-                                if let Some(following) = target.as_str() {
-                                    info!(
-                                        "Processing undo follow: {} unfollowing {}",
-                                        actor.actor_id, following
-                                    );
+            if let Some(type_val) = obj.additional_properties.get("type")
+                && let Some(object_type) = type_val.as_str()
+            {
+                match object_type {
+                    "Follow" => {
+                        // Extract target from embedded follow object
+                        if let Some(target) = obj.additional_properties.get("object")
+                            && let Some(following) = target.as_str()
+                        {
+                            info!(
+                                "Processing undo follow: {} unfollowing {}",
+                                actor.actor_id, following
+                            );
 
-                                    state
-                                        .db_manager
-                                        .update_follow_status(
-                                            &actor.actor_id,
-                                            following,
-                                            FollowStatus::Cancelled,
-                                        )
-                                        .await
-                                        .map_err(|e| {
-                                            format!("Failed to update follow status: {}", e)
-                                        })?;
-                                }
-                            }
+                            state
+                                .db_manager
+                                .update_follow_status(
+                                    &actor.actor_id,
+                                    following,
+                                    FollowStatus::Cancelled,
+                                )
+                                .await
+                                .map_err(|e| {
+                                    format!("Failed to update follow status: {}", e)
+                                })?;
                         }
-                        _ => {
-                            warn!("Unhandled undo object type: {}", object_type);
-                        }
+                    }
+                    _ => {
+                        warn!("Unhandled undo object type: {}", object_type);
                     }
                 }
             }
@@ -1139,39 +1136,39 @@ async fn handle_create_activity(
     match object {
         oxifed::ObjectOrLink::Object(obj) => {
             // Determine object type from the Object struct
-            if let Some(type_val) = obj.additional_properties.get("type") {
-                if let Some(object_type) = type_val.as_str() {
-                    match object_type {
-                        "Note" | "Article" => {
-                            info!(
-                                "Sending {} creation from {} to incoming processing exchange",
-                                object_type, actor.actor_id
-                            );
-                            let object_json = serde_json::to_value(obj)
-                                .map_err(|e| format!("Failed to serialize object: {}", e))?;
+            if let Some(type_val) = obj.additional_properties.get("type")
+                && let Some(object_type) = type_val.as_str()
+            {
+                match object_type {
+                    "Note" | "Article" => {
+                        info!(
+                            "Sending {} creation from {} to incoming processing exchange",
+                            object_type, actor.actor_id
+                        );
+                        let object_json = serde_json::to_value(obj)
+                            .map_err(|e| format!("Failed to serialize object: {}", e))?;
 
-                            let attributed_to = object_json
-                                .get("attributedTo")
-                                .and_then(|a| a.as_str())
-                                .unwrap_or(&actor.actor_id);
+                        let attributed_to = object_json
+                            .get("attributedTo")
+                            .and_then(|a| a.as_str())
+                            .unwrap_or(&actor.actor_id);
 
-                            crate::rabbitmq::publish_incoming_object_to_exchange(
-                                &state.mq_pool,
-                                &object_json,
-                                object_type,
-                                attributed_to,
-                                domain,
-                                username,
-                                None,
-                            )
-                            .await
-                            .map_err(|e| {
-                                format!("Failed to publish object to incoming exchange: {}", e)
-                            })?;
-                        }
-                        _ => {
-                            warn!("Unhandled create object type: {}", object_type);
-                        }
+                        crate::rabbitmq::publish_incoming_object_to_exchange(
+                            &state.mq_pool,
+                            &object_json,
+                            object_type,
+                            attributed_to,
+                            domain,
+                            username,
+                            None,
+                        )
+                        .await
+                        .map_err(|e| {
+                            format!("Failed to publish object to incoming exchange: {}", e)
+                        })?;
+                    }
+                    _ => {
+                        warn!("Unhandled create object type: {}", object_type);
                     }
                 }
             }

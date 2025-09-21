@@ -191,8 +191,8 @@ impl RpcClient {
             while let Some(delivery) = consumer.next().await {
                 match delivery {
                     Ok(delivery) => {
-                        if let Some(corr_id) = delivery.properties.correlation_id() {
-                            if corr_id.as_str() == correlation_id {
+                        if let Some(corr_id) = delivery.properties.correlation_id()
+                            && corr_id.as_str() == correlation_id {
                                 // Found our response
                                 if let Err(e) = delivery
                                     .ack(lapin::options::BasicAckOptions::default())
@@ -207,7 +207,6 @@ impl RpcClient {
                                     return Ok(response);
                                 }
                             }
-                        }
                     }
                     Err(e) => {
                         return Err(MessagingError::Connection(e));
