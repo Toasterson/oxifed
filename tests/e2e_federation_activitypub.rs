@@ -553,7 +553,13 @@ impl ActivityPubTestHelper {
 async fn test_follow_accept_workflow() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E federation tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = ActivityPubTestHelper::new();
 
@@ -625,7 +631,13 @@ async fn test_follow_accept_workflow() {
 async fn test_follow_reject_workflow() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E federation tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = ActivityPubTestHelper::new();
 
@@ -694,7 +706,13 @@ async fn test_follow_reject_workflow() {
 async fn test_like_workflow() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E federation tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = ActivityPubTestHelper::new();
 
@@ -766,7 +784,13 @@ async fn test_like_workflow() {
 async fn test_announce_workflow() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E federation tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = ActivityPubTestHelper::new();
 
@@ -864,7 +888,13 @@ async fn test_announce_workflow() {
 async fn test_undo_workflow() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E federation tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = ActivityPubTestHelper::new();
 
@@ -984,7 +1014,13 @@ async fn test_undo_workflow() {
 async fn test_comprehensive_activitypub_workflow() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E federation tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = ActivityPubTestHelper::new();
 
@@ -1267,4 +1303,13 @@ async fn test_comprehensive_activitypub_workflow() {
 
     info!("✅ Comprehensive ActivityPub workflow test passed!");
     info!("Successfully tested: Follow, Accept, Reject, Like, Announce, Reply, and Undo");
+}
+
+
+// Helper to decide if E2E tests should run. Set OXIFED_RUN_E2E=1 (or true) to enable.
+fn should_run_e2e() -> bool {
+    match std::env::var("OXIFED_RUN_E2E") {
+        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true"),
+        Err(_) => false,
+    }
 }

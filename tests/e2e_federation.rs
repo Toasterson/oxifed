@@ -389,7 +389,13 @@ async fn test_e2e_federation_workflow() {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E federation tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = E2ETestHelper::new();
 
@@ -668,7 +674,13 @@ async fn test_e2e_federation_workflow() {
 async fn test_domain_resolution() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E federation tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = E2ETestHelper::new();
 
@@ -791,7 +803,13 @@ async fn test_domain_resolution() {
 async fn test_message_federation_reliability() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E federation tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = E2ETestHelper::new();
 
@@ -891,4 +909,13 @@ async fn test_message_federation_reliability() {
     );
 
     info!("✅ Message federation reliability test passed");
+}
+
+
+// Helper to decide if E2E tests should run. Set OXIFED_RUN_E2E=1 (or true) to enable.
+fn should_run_e2e() -> bool {
+    match std::env::var("OXIFED_RUN_E2E") {
+        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true"),
+        Err(_) => false,
+    }
 }

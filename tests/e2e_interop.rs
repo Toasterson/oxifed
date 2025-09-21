@@ -440,7 +440,13 @@ impl InteropTestHelper {
 async fn test_webfinger_discovery_interop() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E interop tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = InteropTestHelper::new();
 
@@ -495,7 +501,13 @@ async fn test_webfinger_discovery_interop() {
 async fn test_oxifed_to_snac_follow() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E interop tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = InteropTestHelper::new();
 
@@ -547,7 +559,13 @@ async fn test_oxifed_to_snac_follow() {
 async fn test_oxifed_to_mitra_interaction() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E interop tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = InteropTestHelper::new();
 
@@ -601,7 +619,13 @@ async fn test_oxifed_to_mitra_interaction() {
 async fn test_multi_implementation_note_federation() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E interop tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = InteropTestHelper::new();
 
@@ -653,7 +677,13 @@ async fn test_multi_implementation_note_federation() {
 async fn test_comprehensive_interop_scenario() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E interop tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = InteropTestHelper::new();
 
@@ -773,7 +803,13 @@ async fn test_comprehensive_interop_scenario() {
 async fn test_error_handling_interop() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        .init();
+        .try_init()
+        .ok();
+
+    if !should_run_e2e() {
+        eprintln!("Skipping E2E interop tests (set OXIFED_RUN_E2E=1 to enable)");
+        return;
+    }
 
     let helper = InteropTestHelper::new();
 
@@ -829,4 +865,13 @@ async fn test_error_handling_interop() {
     }
 
     info!("✅ Error handling interop test completed");
+}
+
+
+// Helper to decide if E2E tests should run. Set OXIFED_RUN_E2E=1 (or true) to enable.
+fn should_run_e2e() -> bool {
+    match std::env::var("OXIFED_RUN_E2E") {
+        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true"),
+        Err(_) => false,
+    }
 }
