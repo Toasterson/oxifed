@@ -133,7 +133,7 @@ impl ActivityPubClient {
         let entity = self.fetch_object(actor_id).await?;
 
         match entity {
-            ActivityPubEntity::Object(object) => Ok(object),
+            ActivityPubEntity::Object(object) => Ok(*object),
             _ => Err(ClientError::MissingField(String::from(
                 "Expected actor object, but got a different entity type",
             ))),
@@ -220,7 +220,7 @@ impl ActivityPubClient {
         let entity = self.handle_response(response).await?;
 
         match entity {
-            ActivityPubEntity::Activity(activity) => Ok(activity),
+            ActivityPubEntity::Activity(activity) => Ok(*activity),
             _ => Err(ClientError::MissingField(
                 "Expected activity in response".into(),
             )),

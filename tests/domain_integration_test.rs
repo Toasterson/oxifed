@@ -162,6 +162,7 @@ fn test_get_domain_rpc_workflow() {
     if let MessageEnum::DomainRpcResponse(resp) = deserialized_response {
         assert_eq!(resp.request_id, request_id);
         if let DomainRpcResult::DomainDetails { domain } = resp.result {
+            let domain = *domain;
             assert!(domain.is_some());
             let domain_info = domain.unwrap();
             assert_eq!(domain_info.domain, domain_name);
@@ -180,6 +181,7 @@ fn test_get_domain_rpc_workflow() {
 
     if let MessageEnum::DomainRpcResponse(resp) = deserialized_not_found {
         if let DomainRpcResult::DomainDetails { domain } = resp.result {
+            let domain = *domain;
             assert!(domain.is_none());
         } else {
             panic!("Expected DomainDetails result");

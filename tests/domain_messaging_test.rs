@@ -134,6 +134,7 @@ fn test_domain_rpc_response_serialization() {
     if let MessageEnum::DomainRpcResponse(rpc_resp) = deserialized {
         assert_eq!(rpc_resp.request_id, "req-456");
         if let DomainRpcResult::DomainDetails { domain } = rpc_resp.result {
+            let domain = *domain;
             assert!(domain.is_some());
             assert_eq!(domain.unwrap().domain, "test.com");
         } else {

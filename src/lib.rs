@@ -196,7 +196,7 @@ impl ObjectOrLink {
     /// an Object or Link's ID or URL property
     pub fn get_url(&self) -> Option<&Url> {
         match self {
-            ObjectOrLink::Object(obj) => obj.id.as_ref().or_else(|| obj.url.as_ref()),
+            ObjectOrLink::Object(obj) => obj.id.as_ref().or(obj.url.as_ref()),
             ObjectOrLink::Link(link) => link.href.as_ref(),
             ObjectOrLink::Url(url) => Some(url),
         }
@@ -323,8 +323,8 @@ pub struct FileAttachment {
 #[serde(untagged)]
 pub enum ActivityPubEntity {
     Actor(Actor),
-    Activity(Activity),
-    Object(Object),
+    Activity(Box<Activity>),
+    Object(Box<Object>),
     Link(Link),
     Collection(Collection),
 }
@@ -346,7 +346,7 @@ impl<'de> Deserialize<'de> for ActivityPubEntity {
                     | "Announce" | "Undo" | "Update" | "Delete" | "Block" | "Offer" | "Invite" => {
                         let activity: Activity = serde_json::from_value(value.clone())
                             .map_err(serde::de::Error::custom)?;
-                        Ok(ActivityPubEntity::Activity(activity))
+                        Ok(ActivityPubEntity::Activity(Box::new(activity)))
                     }
                     // Collection types
                     "Collection"
@@ -372,27 +372,27 @@ impl<'de> Deserialize<'de> for ActivityPubEntity {
                             // If Actor parsing fails (e.g., missing domain field), parse as Object
                             let object: Object = serde_json::from_value(value.clone())
                                 .map_err(serde::de::Error::custom)?;
-                            Ok(ActivityPubEntity::Object(object))
+                            Ok(ActivityPubEntity::Object(Box::new(object)))
                         }
                     }
                     // Default to Object for all other types
                     _ => {
                         let object: Object = serde_json::from_value(value.clone())
                             .map_err(serde::de::Error::custom)?;
-                        Ok(ActivityPubEntity::Object(object))
+                        Ok(ActivityPubEntity::Object(Box::new(object)))
                     }
                 }
             } else {
                 // Type value is not a string, default to Object
                 let object: Object =
                     serde_json::from_value(value.clone()).map_err(serde::de::Error::custom)?;
-                Ok(ActivityPubEntity::Object(object))
+                Ok(ActivityPubEntity::Object(Box::new(object)))
             }
         } else {
             // If no type is specified, try to deserialize as an Object
             let object: Object =
                 serde_json::from_value(value.clone()).map_err(serde::de::Error::custom)?;
-            Ok(ActivityPubEntity::Object(object))
+            Ok(ActivityPubEntity::Object(Box::new(object)))
         }
     }
 }
@@ -426,6 +426,7 @@ mod tests {
         let result = parse_activitypub_json(json).unwrap();
 
         if let ActivityPubEntity::Activity(activity) = result {
+            let activity = *activity;
             assert_eq!(activity.activity_type, ActivityType::Create);
             assert_eq!(
                 activity.id,
@@ -473,6 +474,7 @@ mod tests {
         let result = parse_activitypub_json(json).unwrap();
 
         if let ActivityPubEntity::Object(object) = result {
+            let object = *object;
             assert_eq!(object.object_type, ObjectType::Person);
             assert_eq!(
                 object.id,

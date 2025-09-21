@@ -250,7 +250,7 @@ impl RpcClient {
         let response = self.send_rpc_request(request).await?;
 
         match response.result {
-            oxifed::messaging::DomainRpcResult::DomainDetails { domain } => Ok(domain),
+            oxifed::messaging::DomainRpcResult::DomainDetails { domain } => Ok(*domain),
             oxifed::messaging::DomainRpcResult::Error { message: _ } => {
                 Err(MessagingError::ConfirmationError) // Convert to appropriate error
             }

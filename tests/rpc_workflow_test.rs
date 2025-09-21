@@ -172,6 +172,7 @@ fn test_complete_get_domain_rpc_workflow() {
     assert_eq!(client_response.request_id, request_id);
 
     if let DomainRpcResult::DomainDetails { domain } = client_response.result {
+        let domain = *domain;
         assert!(domain.is_some());
         let domain_info = domain.unwrap();
 
@@ -259,6 +260,7 @@ fn test_domain_not_found_workflow() {
             assert_eq!(client_response.request_id, request_id);
 
             if let DomainRpcResult::DomainDetails { domain } = client_response.result {
+                let domain = *domain;
                 assert!(domain.is_none());
             } else {
                 panic!("Expected DomainDetails result");

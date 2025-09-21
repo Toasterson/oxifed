@@ -156,6 +156,7 @@ fn test_domain_details_not_found_serialization() {
     if let MessageEnum::DomainRpcResponse(parsed_response) = parsed_message {
         assert_eq!(parsed_response.request_id, request_id);
         if let DomainRpcResult::DomainDetails { domain } = parsed_response.result {
+            let domain = *domain;
             assert!(domain.is_none());
         } else {
             panic!("Expected DomainDetails result");

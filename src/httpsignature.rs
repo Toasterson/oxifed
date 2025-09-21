@@ -652,10 +652,9 @@ impl HttpSignature {
         }
 
         // Check for expiration
-        if let Some(expires) = signature.parameters.expires {
-            if expires < Utc::now() {
+        if let Some(expires) = signature.parameters.expires
+            && expires < Utc::now() {
                 return Err(SignatureError::SignatureExpired);
-            }
         }
 
         // Check key ID if expected
@@ -704,7 +703,7 @@ impl HttpSignature {
         // Decode the signature from base64
         let signature_bytes = BASE64
             .decode(signature_b64)
-            .map_err(|e| SignatureError::Base64Error(e))?;
+            .map_err(SignatureError::Base64Error)?;
 
         match algorithm {
             SignatureAlgorithm::Ed25519 => {

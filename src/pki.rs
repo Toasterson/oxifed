@@ -485,8 +485,8 @@ impl PkiManager {
         chain.push(user_link);
 
         // Add domain key link if exists
-        if let Some(domain_sig) = &user_key.domain_signature {
-            if let Some(domain_key) = self.domain_keys.get(&domain_sig.domain) {
+        if let Some(domain_sig) = &user_key.domain_signature
+            && let Some(domain_key) = self.domain_keys.get(&domain_sig.domain) {
                 let domain_link = TrustChainLink {
                     level: "domain".to_string(),
                     key_id: domain_key.key_id.clone(),
@@ -499,7 +499,6 @@ impl PkiManager {
                     created_at: domain_key.created_at,
                 };
                 chain.push(domain_link);
-            }
         }
 
         // Add master key link if exists
@@ -538,9 +537,9 @@ impl PkiManager {
         let trust_chain = self.build_trust_chain(key_id)?;
 
         // Verify each link in the chain
-        for (_i, link) in trust_chain.verification_chain.iter().enumerate() {
-            if !link.self_signed {
-                if let Some(signer_key_id) = &link.signed_by {
+        for link in trust_chain.verification_chain.iter() {
+            if !link.self_signed
+                && let Some(signer_key_id) = &link.signed_by {
                     // Verify signature exists and is valid
                     // This would involve cryptographic verification in a real implementation
                     tracing::debug!(
@@ -548,7 +547,6 @@ impl PkiManager {
                         signer_key_id,
                         link.key_id
                     );
-                }
             }
         }
 

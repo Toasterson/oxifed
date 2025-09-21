@@ -409,6 +409,7 @@ pub struct DomainCreateMessage {
 
 impl DomainCreateMessage {
     /// Create a new domain creation message
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         domain: String,
         name: Option<String>,
@@ -472,6 +473,7 @@ pub struct DomainUpdateMessage {
 
 impl DomainUpdateMessage {
     /// Create a new domain update message
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         domain: String,
         name: Option<String>,
@@ -576,7 +578,7 @@ pub struct DomainRpcResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DomainRpcResult {
     DomainList { domains: Vec<DomainInfo> },
-    DomainDetails { domain: Option<DomainInfo> },
+    DomainDetails { domain: Box<Option<DomainInfo>> },
     Error { message: String },
 }
 
@@ -610,7 +612,7 @@ impl DomainRpcResponse {
     pub fn domain_details(request_id: String, domain: Option<DomainInfo>) -> Self {
         Self {
             request_id,
-            result: DomainRpcResult::DomainDetails { domain },
+            result: DomainRpcResult::DomainDetails { domain: Box::new(domain) },
         }
     }
 
