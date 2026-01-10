@@ -447,7 +447,8 @@ impl PublisherDaemon {
 /// Load configuration from environment variables
 fn load_config() -> PublisherConfig {
     PublisherConfig {
-        amqp_url: std::env::var("AMQP_URL")
+        amqp_url: std::env::var("AMQP_URI")
+            .or_else(|_| std::env::var("AMQP_URL"))
             .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672".to_string()),
         worker_count: std::env::var("PUBLISHER_WORKERS")
             .ok()

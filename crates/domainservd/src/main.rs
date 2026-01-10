@@ -99,7 +99,8 @@ async fn main() -> Result<(), DomainservdError> {
     let db = Arc::new(mongodb);
 
     // Initialize LavinMQ connection
-    let amqp_url = std::env::var("AMQP_URL")
+    let amqp_url = std::env::var("AMQP_URI")
+        .or_else(|_| std::env::var("AMQP_URL"))
         .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672".to_string());
 
     tracing::info!("Connecting to LavinMQ at {}", amqp_url);
