@@ -194,8 +194,8 @@ docker run -d -p 27017:27017 \
 
 # Start RabbitMQ
 docker run -d -p 5672:5672 -p 15672:15672 \
-  -e RABBITMQ_DEFAULT_USER=admin \
-  -e RABBITMQ_DEFAULT_PASS=testpassword \
+  -e LAVINMQ_DEFAULT_USER=admin \
+  -e LAVINMQ_DEFAULT_PASS=testpassword \
   cloudamqp/lavinmq:latest
 
 # Set environment variables

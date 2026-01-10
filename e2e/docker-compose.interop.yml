@@ -25,8 +25,8 @@ services:
     image: cloudamqp/lavinmq:latest
     container_name: rabbitmq-interop
     environment:
-      RABBITMQ_DEFAULT_USER: admin
-      RABBITMQ_DEFAULT_PASS: testpassword
+      LAVINMQ_DEFAULT_USER: admin
+      LAVINMQ_DEFAULT_PASS: testpassword
     ports:
       - "5672:5672"
       - "15672:15672"

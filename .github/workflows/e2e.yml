@@ -62,13 +62,13 @@ jobs:
       rabbitmq:
         image: cloudamqp/lavinmq:latest
         env:
-          RABBITMQ_DEFAULT_USER: admin
-          RABBITMQ_DEFAULT_PASS: testpassword
+          LAVINMQ_DEFAULT_USER: admin
+          LAVINMQ_DEFAULT_PASS: testpassword
         ports:
           - 5672:5672
           - 15672:15672
         options: >-
-          --health-cmd="curl -f http://localhost:15672 || exit 1"
+          --health-cmd="lavinmqctl status"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
