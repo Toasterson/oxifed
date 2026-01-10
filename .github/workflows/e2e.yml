@@ -110,9 +110,9 @@ jobs:
       - name: Build services
         run: |
           echo "Building domainservd..."
-          cargo build --release --bin domainservd
+          cargo build --release -p domainservd
           echo "Building publisherd..."
-          cargo build --release --bin publisherd
+          cargo build --release -p publisherd
           echo "Building test binaries..."
           cargo build --release --tests
           echo "Building ActivityPub test binary..."
