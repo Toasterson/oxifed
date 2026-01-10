@@ -2,11 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-01-10
+
+### Miscellaneous Tasks
+
+- Simplify SHA type configuration in CI workflow
+
 ## [0.3.2] - 2026-01-10
 
 ### Miscellaneous Tasks
 
 - Fix cargo release tagging
+- Release 0.3.2
 
 ## [0.3.1] - 2026-01-10
 
