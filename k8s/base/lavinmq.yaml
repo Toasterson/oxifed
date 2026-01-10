@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lavinmq
+  labels:
+    app: lavinmq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lavinmq
+  template:
+    metadata:
+      labels:
+        app: lavinmq
+    spec:
+      containers:
+      - name: lavinmq
+        image: cloudamqp/lavinmq:latest
+        ports:
+        - containerPort: 5672
+          name: amqp
+        - containerPort: 15672
+          name: management
+        volumeMounts:
+        - name: lavinmq-data
+          mountPath: /var/lib/lavinmq
+      volumes:
+      - name: lavinmq-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lavinmq
+spec:
+  selector:
+    app: lavinmq
+  ports:
+  - name: amqp
+    port: 5672
+    targetPort: 5672
+  - name: management
+    port: 15672
+    targetPort: 15672
