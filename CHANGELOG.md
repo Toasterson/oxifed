@@ -1,98 +1,74 @@
 # Changelog
 
-All notable changes to Oxifed will be documented in this file.
+All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.2.0] - 2026-01-10
 
-## [Unreleased]
+### Bug Fixes
 
-### Added
-- Initial project setup with workspace architecture
-- Core daemon infrastructure (domainservd, publisherd)
-- ActivityPub protocol implementation
-- HTTP signature authentication and validation
-- Multi-domain support with isolated configurations
-- RabbitMQ message queue integration with hybrid architecture
-- MongoDB database layer with proper indexing
-- CLI administration tool (oxiadm) for domain and profile management
-- WebFinger protocol support for actor discovery
-- Public Key Infrastructure (PKI) with trust hierarchy
-- Docker containerization and development environment
-- Comprehensive test suite with federation testing
-- CI/CD pipeline with security auditing
-- Complete documentation (DESIGN.md, ARCHITECTURE.md)
+- Preserve acct: prefix in WebFinger subject instead of removing it
 
-### Changed
-- N/A (initial release)
+### Features
 
-### Deprecated
-- N/A (initial release)
+- *(messaging)* Add LavinMQ messaging module and RabbitMQ integration for profile processing
+- Enable serving webfinger from mongodb
 
-### Removed
-- N/A (initial release)
+### Miscellaneous Tasks
 
-### Fixed
-- N/A (initial release)
+- Add inspection profile configuration for duplicated code detection
+- *(domainservd)* Rewrite wo more working standard
+- *(domainservd)* Add sample data
+- Format
+- Add Kubernetes deployment guide with FluxCD setup to documentation
+- Add release automation with git-cliff, cargo-release, and enhanced CI/CD workflows Including Docker support
+- Add base Kubernetes manifests for LavinMQ and MongoDB
+- Add Kubernetes manifests for publisherd and domainservd deployments
+- Add oxifed-operator with Dockerfile, CRD, and Kubernetes manifests
+- Add IntelliJ rustfmt configuration file
+- Add missing package metadata to Cargo.toml files
 
-### Security
-- HTTP signature implementation for ActivityPub authentication
-- PKI-based trust system with domain verification
-- Rate limiting and security monitoring capabilities
-- Comprehensive security audit pipeline
+### Refactor
 
-## [0.1.0] - TBD
+- *(cli)* [**breaking**] Replace deprecated MongoDB operations with AMQP messaging
 
-### Added
-- Initial public release
-- Core ActivityPub platform functionality
-- Federation with major ActivityPub platforms (Mastodon, Pleroma)
-- Multi-application support (microblogging, blogging, portfolio)
-- Production-ready deployment configuration
-- Complete API documentation
-- Community guidelines and contribution framework
+### WIP
 
----
+- Claude changes
+- Claude changes
+- AI application summary
+- Design docs
 
-## Release Process
+### `chore
 
-### Version Numbering
-- **Major** (X.0.0): Breaking changes to public APIs or federation protocol
-- **Minor** (0.X.0): New features, backward-compatible changes
-- **Patch** (0.0.X): Bug fixes, security patches, minor improvements
+- *(deps)* Replace deadpool with deadpool-lapin in domainservd`
+- Remove deadpool dependency from Cargo.lock`
+- *(db)* Remove MongoDB integration and related dependencies`
+- Remove mongodb dependency from Cargo.lock`
+- Reformat code for improved readability in pki module`
+- [**breaking**] Remove unused dependencies and update Cargo.lock for cleanup`
+- Reformat conditional block in E2E test for improved readability`
+- [**breaking**] Update Cargo.lock with new dependencies for Kubernetes client libraries and runtime support`
+- Add kustomize configurations for base and dev overlays in Kubernetes setup`
+- Add Flux GitRepository and Kustomization for oxifed-dev`
 
-### Release Types
-- **Alpha**: Early development versions (0.1.0-alpha.1)
-- **Beta**: Feature-complete pre-releases (0.1.0-beta.1)
-- **Release Candidates**: Final testing versions (0.1.0-rc.1)
-- **Stable**: Production-ready releases (0.1.0)
+### `feat
 
-### Release Notes Format
-Each release includes:
-- **Overview**: High-level summary of changes
-- **Breaking Changes**: API/protocol changes requiring migration
-- **New Features**: Added functionality and capabilities
-- **Improvements**: Performance, usability, and developer experience
-- **Bug Fixes**: Resolved issues and stability improvements
-- **Security**: Security-related fixes and enhancements
-- **Federation**: ActivityPub compatibility and interoperability updates
-- **Documentation**: Documentation improvements and additions
-- **Dependencies**: Updated or new dependencies
-- **Migration Guide**: Steps for upgrading from previous versions
+- *(db)* Add MongoDB integration with collections initialization`
+- *(pki)* Add key pair generation support and messaging integration`
+- *(rabbitmq)* Add public key generation for actor documents`
+- *(rabbitmq)* Implement database persistence for generated keys`
 
-### Platform Compatibility
-Each release is tested against:
-- **Mastodon**: Latest stable and previous major version
-- **Pleroma**: Latest stable release
-- **PeerTube**: Latest stable release
-- **Other ActivityPub platforms**: As available
+### `refactor
 
-### Support Policy
-- **Current Release**: Full support with regular updates
-- **Previous Minor**: Security fixes and critical bug fixes
-- **Older Releases**: Security fixes only (case-by-case basis)
+- *(messaging)* Introduce structured messages for profile, note, and activity operations and replace legacy JSON-based methods`
+- Simplify domain extraction, error handling, and ownership patterns`
+- [**breaking**] Use short-circuiting patterns for error handling and redundant checks, enhance error enum, and simplify ownership`
+- [**breaking**] Streamline error handling and conditionals using short-circuiting, remove redundant code`
+- [**breaking**] Use consistent formatting for conditionals, streamline chained checks, and improve readability across multiple modules`
 
-### Deprecation Policy
-- **Advance Notice**: 1 major version for API changes
-- **Federation Changes**: Coordinated with ActivityPub community
-- **Migration Support**: Tools and guides provided for transitions
+### `test
+
+- Add integration test for federation across multiple servers`
+- [**breaking**] Add conditional E2E test execution with environment variable check, streamline tracing initialization`
+
+<!-- generated by git-cliff -->
