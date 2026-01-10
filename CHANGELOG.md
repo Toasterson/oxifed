@@ -32,6 +32,7 @@ All notable changes to this project will be documented in this file.
 - Add missing package metadata to Cargo.toml files
 - Release 0.2.0
 - Configure cargo-release to not publish to crates.io
+- Release 0.3.0
 
 ### Refactor
 

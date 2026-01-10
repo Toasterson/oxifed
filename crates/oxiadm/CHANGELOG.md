@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.0] - 2026-01-10
+## [0.3.1] - 2026-01-10
 
 ### Features
 
@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - *(domainservd)* Rewrite wo more working standard
-- Add missing package metadata for cargo-release
+- Add missing package metadata to Cargo.toml files
 
 ### Refactor
 
