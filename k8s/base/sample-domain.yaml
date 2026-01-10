@@ -1,0 +1,8 @@
+apiVersion: oxifed.io/v1alpha1
+kind: Domain
+metadata:
+  name: example-com
+spec:
+  hostname: example.com
+  description: "Main public domain"
+  adminEmail: admin@example.com

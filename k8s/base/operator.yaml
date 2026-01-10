@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oxifed-operator
+  labels:
+    app: oxifed-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oxifed-operator
+  template:
+    metadata:
+      labels:
+        app: oxifed-operator
+    spec:
+      serviceAccountName: oxifed-operator-sa
+      containers:
+      - name: operator
+        image: ghcr.io/oxifed/oxifed/oxifed-operator:latest
+        env:
+        - name: RUST_LOG
+          value: info
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oxifed-operator-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: oxifed-operator-role
+rules:
+- apiGroups: ["oxifed.io"]
+  resources: ["domains", "domains/status"]
+  verbs: ["get", "list", "watch", "patch", "update"]
+- apiGroups: [""]
+  resources: ["secrets", "events"]
+  verbs: ["get", "list", "watch", "create", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: oxifed-operator-binding
+subjects:
+- kind: ServiceAccount
+  name: oxifed-operator-sa
+roleRef:
+  kind: ClusterRole
+  name: oxifed-operator-role
+  apiGroup: rbac.authorization.k8s.io
