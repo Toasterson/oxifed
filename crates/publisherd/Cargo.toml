@@ -2,6 +2,11 @@
 name = "publisherd"
 version.workspace = true
 edition.workspace = true
+description = "Publisher daemon for ActivityPub message processing"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 
 [[bin]]
 name = "publisherd"

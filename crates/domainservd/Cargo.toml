@@ -3,6 +3,10 @@ name = "domainservd"
 version.workspace = true
 edition.workspace = true
 description = "Domain Service Daemon with WebFinger (RFC 7033) support"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 
 [[bin]]
 name = "domainservd"

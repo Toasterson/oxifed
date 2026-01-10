@@ -1,7 +1,12 @@
 [package]
 name = "oxifed-operator"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+description = "Kubernetes Operator for Oxifed"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 
 [dependencies]
 kube = { version = "0.98", features = ["runtime", "derive"] }

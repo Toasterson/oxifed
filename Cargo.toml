@@ -5,6 +5,11 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+description = "A multi-domain ActivityPub platform with a focus on ease of use and high performance."
+license = "MPL-2.0"
+repository = "https://github.com/oxifed/oxifed"
+homepage = "https://github.com/oxifed/oxifed"
+documentation = "https://github.com/oxifed/oxifed/blob/main/DOCUMENTATION.md"
 
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -37,6 +42,11 @@ pre-release-hook = ["git-cliff", "--tag", "{{version}}", "--output", "CHANGELOG.
 name = "oxifed"
 version.workspace = true
 edition.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 
 [dependencies]
 serde = { workspace = true }
