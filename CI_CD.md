@@ -63,6 +63,8 @@ To create a new release (e.g., a patch):
    cargo release patch --workspace
    ```
 
+   Note: The project is configured to not publish to crates.io (`publish = false`).
+
 2. **Execute**: Create the release commit and tag:
    ```bash
    cargo release patch --workspace --execute
