@@ -1043,7 +1043,7 @@ checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
 name = "domainservd"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axum",
  "chrono",
@@ -2667,7 +2667,7 @@ checksum = "48dd4f4a2c8405440fd0462561f0e5806bd0f77e86f51c761481bdd4018b545e"
 
 [[package]]
 name = "oxiadm"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "clap",
  "futures",
@@ -2685,7 +2685,7 @@ dependencies = [
 
 [[package]]
 name = "oxifed"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2711,7 +2711,7 @@ dependencies = [
 
 [[package]]
 name = "oxifed-operator"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "chrono",
  "futures",
@@ -3021,7 +3021,7 @@ dependencies = [
 
 [[package]]
 name = "publisherd"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "futures",
  "lapin",

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-01-10
+
+### Miscellaneous Tasks
+
+- Fix cargo release tagging
+
 ## [0.3.1] - 2026-01-10
 
 ### Miscellaneous Tasks
@@ -10,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Replace `cargo install` with prebuilt binary for cargo-release in CI workflow
 - Replace `kenji-kanane/setup-git-cliff` action with prebuilt binary installation in workflows
 - Update RabbitMQ references to LavinMQ across e2e configurations and workflows
+- Release 0.3.1
 
 ## [0.3.0] - 2026-01-10
 
