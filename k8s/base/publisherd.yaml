@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: publisherd
+  labels:
+    app: publisherd
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: publisherd
+  template:
+    metadata:
+      labels:
+        app: publisherd
+    spec:
+      containers:
+      - name: publisherd
+        image: ghcr.io/oxifed/oxifed/publisherd:latest
+        env:
+        - name: AMQP_URL
+          value: amqp://guest:guest@lavinmq:5672
+        - name: RUST_LOG
+          value: info
+        - name: PUBLISHER_WORKERS
+          value: "4"
