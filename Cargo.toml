@@ -26,6 +26,13 @@ futures = "0.3"
 regex = "1"
 hex = "0.4"
 
+[workspace.metadata.release]
+tag-prefix = "v"
+consolidate-commits = true
+pre-release-commit-message = "chore: release {{version}}"
+tag-message = "chore: release {{version}}"
+pre-release-hook = ["git-cliff", "--tag", "{{version}}", "--output", "CHANGELOG.md"]
+
 [package]
 name = "oxifed"
 version.workspace = true

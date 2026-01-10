@@ -8,6 +8,7 @@ The CI/CD pipeline is implemented using GitHub Actions and consists of two main 
 
 1. **Pull Request Checks** (`pr.yml`) - Fast feedback for pull requests
 2. **CI/CD Pipeline** (`ci.yml`) - Full testing and Docker image publishing
+3. **Release Workflow** (`release.yml`) - Automates GitHub Release creation on version tags using `git-cliff` for release notes.
 
 ## Workflows
 
@@ -26,17 +27,57 @@ Triggered on all pull requests to `main` and `develop` branches.
 
 ### CI/CD Pipeline (`ci.yml`)
 
-Triggered on pushes to `main` and `develop` branches, and on pull requests.
+Triggered on pushes to `main` and `develop` branches, pull requests, and version tags (`v*`).
 
 **Jobs:**
 - **Test Suite**: Same as PR workflow
 - **Security Audit**: Same as PR workflow  
-- **Build and Publish**: Builds and publishes Docker images (only on push to main/develop)
+- **Build and Publish**: Builds and publishes Docker images for `domainservd`, `publisherd`, and `oxifed-operator` (only on push to main/develop or on version tags)
 - **Dependency Review**: Reviews dependencies for security issues (only on PRs)
+- **Release Dry Run**: Verifies that `cargo-release` can successfully prepare a release (only on push to main/develop)
+
+### Release Workflow (`release.yml`)
+
+Triggered on pushes of version tags (`v*`).
+
+**Jobs:**
+- **Create GitHub Release**: Automatically creates a GitHub release with generated release notes and the content of `CHANGELOG.md`.
+
+## Release Process
+
+Oxifed uses `cargo-release` to manage versions and tags across the workspace.
+
+### Prerequisites
+
+Install `cargo-release` locally:
+```bash
+cargo install cargo-release
+```
+
+### Creating a Release
+
+To create a new release (e.g., a patch):
+
+1. **Dry Run**: Verify everything is correct:
+   ```bash
+   cargo release patch --workspace
+   ```
+
+2. **Execute**: Create the release commit and tag:
+   ```bash
+   cargo release patch --workspace --execute
+   ```
+
+3. **Push**: Push the new tag to GitHub:
+   ```bash
+   git push --follow-tags
+   ```
+
+The `ci.yml` workflow will then build and publish Docker images, and the `release.yml` workflow will create the GitHub release.
 
 ## Docker Images
 
-The pipeline builds and publishes Docker images for two services:
+The pipeline builds and publishes Docker images for three services:
 
 ### domainservd
 - **Purpose**: Domain Service Daemon with WebFinger (RFC 7033) support
@@ -49,11 +90,18 @@ The pipeline builds and publishes Docker images for two services:
 - **Registry**: `ghcr.io/<repository>/publisherd`
 - **Dockerfile**: `docker/publisherd/Dockerfile`
 
+### oxifed-operator
+- **Purpose**: Kubernetes Operator for managing Domain CRDs
+- **Registry**: `ghcr.io/<repository>/oxifed-operator`
+- **Dockerfile**: `docker/oxifed-operator/Dockerfile`
+
 ## Image Tagging Strategy
 
 Docker images are tagged with:
 - `latest` - Latest stable version from main branch
 - `<branch-name>` - Branch-specific builds
+- `<version>` - Semver tags (e.g., `1.0.0`) when a git tag is pushed
+- `<major>.<minor>` - Major/minor version tags (e.g., `1.0`) when a git tag is pushed
 - `<branch-name>-<sha>` - Specific commit builds
 - `pr-<number>` - Pull request builds
 
@@ -128,6 +176,9 @@ docker build -f docker/domainservd/Dockerfile -t domainservd .
 
 # Build publisherd  
 docker build -f docker/publisherd/Dockerfile -t publisherd .
+
+# Build oxifed-operator
+docker build -f docker/oxifed-operator/Dockerfile -t oxifed-operator .
 ```
 
 ## Troubleshooting
