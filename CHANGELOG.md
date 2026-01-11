@@ -2,11 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.8] - 2026-01-11
+
+### Miscellaneous Tasks
+
+- Update MongoDB database name to `domainservd` and make it configurable via env variable
+
 ## [0.3.7] - 2026-01-11
 
 ### Miscellaneous Tasks
 
 - Add upsert methods for keys and domains in database manager and integrate MongoDB key reconciliation logic
+- Release 0.3.7
 
 ## [0.3.6] - 2026-01-11
 
