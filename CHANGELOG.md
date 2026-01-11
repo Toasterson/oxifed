@@ -2,11 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.4] - 2026-01-11
+
+### Miscellaneous Tasks
+
+- Fallback to `AMQP_URL` if `AMQP_URI` is not set
+- Use package option instead of binary flag in e2e build steps
+- Add node affinity for amd64 architecture in Kubernetes deployments
+- Update Rust base image to `nightly-bookworm` in Dockerfiles
+
 ## [0.3.3] - 2026-01-10
 
 ### Miscellaneous Tasks
 
 - Simplify SHA type configuration in CI workflow
+- Release 0.3.3
 
 ## [0.3.2] - 2026-01-10
 
