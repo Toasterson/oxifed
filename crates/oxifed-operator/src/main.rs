@@ -38,6 +38,10 @@ struct Context {
 }
 
 async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
+    if domain.metadata.deletion_timestamp.is_some() {
+        return Ok(Action::await_change());
+    }
+
     let ns = domain.namespace().unwrap();
     let domains: Api<Domain> = Api::namespaced(ctx.client.clone(), &ns);
 
@@ -60,16 +64,24 @@ async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
         "status": new_status
     });
 
-    domains
+    match domains
         .patch_status(
             &domain.name_any(),
             &kube::api::PatchParams::default(),
             &kube::api::Patch::Merge(&patch),
         )
         .await
-        .map_err(Error::KubeError)?;
-
-    Ok(Action::requeue(Duration::from_secs(3600)))
+    {
+        Ok(_) => Ok(Action::requeue(Duration::from_secs(3600))),
+        Err(kube::Error::Api(e)) if e.code == 404 => {
+            tracing::warn!(
+                "Domain {} not found during status patch, it might have been deleted",
+                domain.name_any()
+            );
+            Ok(Action::await_change())
+        }
+        Err(e) => Err(Error::KubeError(e)),
+    }
 }
 
 fn error_policy(_domain: Arc<Domain>, error: &Error, _ctx: Arc<Context>) -> Action {
