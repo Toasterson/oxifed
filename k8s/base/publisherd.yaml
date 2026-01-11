@@ -14,6 +14,15 @@ spec:
       labels:
         app: publisherd
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - amd64
       containers:
       - name: publisherd
         image: ghcr.io/oxifed/oxifed/publisherd:latest

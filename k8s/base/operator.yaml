@@ -15,6 +15,15 @@ spec:
         app: oxifed-operator
     spec:
       serviceAccountName: oxifed-operator-sa
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - amd64
       containers:
       - name: operator
         image: ghcr.io/oxifed/oxifed/oxifed-operator:latest
