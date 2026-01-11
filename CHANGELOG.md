@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.5] - 2026-01-11
+
+### Miscellaneous Tasks
+
+- Handle domain deletion and improve error handling in reconcile logic
+
 ## [0.3.4] - 2026-01-11
 
 ### Miscellaneous Tasks
@@ -10,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Use package option instead of binary flag in e2e build steps
 - Add node affinity for amd64 architecture in Kubernetes deployments
 - Update Rust base image to `nightly-bookworm` in Dockerfiles
+- Release 0.3.4
 
 ## [0.3.3] - 2026-01-10
 
