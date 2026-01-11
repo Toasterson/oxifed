@@ -2,11 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.7] - 2026-01-11
+
+### Miscellaneous Tasks
+
+- Add upsert methods for keys and domains in database manager and integrate MongoDB key reconciliation logic
+
 ## [0.3.6] - 2026-01-11
 
 ### Miscellaneous Tasks
 
 - Integrate MongoDB support for domain reconciliation workflow
+- Release 0.3.6
 
 ## [0.3.5] - 2026-01-11
 
