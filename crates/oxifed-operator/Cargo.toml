@@ -21,3 +21,5 @@ schemars = { version = "0.8", features = ["chrono"] }
 chrono = { workspace = true, features = ["serde"] }
 miette = { workspace = true }
 thiserror = { workspace = true }
+oxifed = { path = "../../" }
+mongodb = { workspace = true }

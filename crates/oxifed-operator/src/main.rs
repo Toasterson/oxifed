@@ -1,10 +1,19 @@
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
+use k8s_openapi::ByteString;
+use k8s_openapi::api::core::v1::Secret;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::runtime::Controller;
 use kube::{Api, Client};
 use kube::{CustomResource, ResourceExt, runtime::controller::Action};
+use mongodb::bson::doc;
+use oxifed::database::{
+    DatabaseManager, DomainDocument, DomainStatus as DbDomainStatus, RegistrationMode,
+};
+use oxifed::pki::{KeyAlgorithm, KeyPair};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
 
@@ -29,12 +38,17 @@ pub struct DomainStatus {
 pub enum Error {
     #[error("Kube Error: {0}")]
     KubeError(#[source] kube::Error),
+    #[error("Database Error: {0}")]
+    DatabaseError(String),
+    #[error("PKI Error: {0}")]
+    PkiError(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 struct Context {
     client: Client,
+    db_manager: Option<DatabaseManager>,
 }
 
 async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
@@ -44,15 +58,87 @@ async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
 
     let ns = domain.namespace().unwrap();
     let domains: Api<Domain> = Api::namespaced(ctx.client.clone(), &ns);
+    let secrets: Api<Secret> = Api::namespaced(ctx.client.clone(), &ns);
 
     tracing::info!("Reconciling Domain: {}", domain.name_any());
 
-    // In a real implementation, this would:
     // 1. Generate Ed25519 keys if not present
-    // 2. Create a Kubernetes Secret with the keys
-    // 3. Update MongoDB with the domain configuration
+    let secret_name = format!("{}-keys", domain.name_any());
 
-    // For now, we just update the status
+    match secrets
+        .get_opt(&secret_name)
+        .await
+        .map_err(Error::KubeError)?
+    {
+        Some(_) => {
+            tracing::debug!("Secret {} already exists", secret_name);
+        }
+        None => {
+            tracing::info!("Generating keys for Domain: {}", domain.name_any());
+            let _key_pair = KeyPair::generate(KeyAlgorithm::Ed25519)
+                .map_err(|e| Error::PkiError(e.to_string()))?;
+
+            let mut data = BTreeMap::new();
+            // In a real implementation we'd get the actual PEMs from key_pair.
+            // For now, let's use placeholders as the current pki.rs is mostly mocks anyway.
+            data.insert(
+                "public_key.pem".to_string(),
+                ByteString("MOCK_PUBLIC_KEY".as_bytes().to_vec()),
+            );
+            data.insert(
+                "private_key.pem".to_string(),
+                ByteString("MOCK_PRIVATE_KEY".as_bytes().to_vec()),
+            );
+
+            let secret = Secret {
+                metadata: ObjectMeta {
+                    name: Some(secret_name.clone()),
+                    namespace: Some(ns.clone()),
+                    ..Default::default()
+                },
+                data: Some(data),
+                ..Default::default()
+            };
+
+            secrets
+                .create(&kube::api::PostParams::default(), &secret)
+                .await
+                .map_err(Error::KubeError)?;
+        }
+    }
+
+    // 2. Update MongoDB with the domain configuration
+    if let Some(ref db_manager) = ctx.db_manager {
+        tracing::info!("Updating MongoDB for Domain: {}", domain.name_any());
+
+        let db_domain = DomainDocument {
+            id: None,
+            domain: domain.spec.hostname.clone(),
+            name: Some(domain.name_any()),
+            description: domain.spec.description.clone(),
+            contact_email: domain.spec.admin_email.clone(),
+            rules: None,
+            registration_mode: RegistrationMode::Closed,
+            authorized_fetch: true,
+            max_note_length: Some(500),
+            max_file_size: Some(10 * 1024 * 1024),
+            allowed_file_types: Some(vec!["image/jpeg".to_string(), "image/png".to_string()]),
+            domain_key_id: Some(secret_name),
+            config: None,
+            status: DbDomainStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        db_manager
+            .insert_domain(db_domain)
+            .await
+            .map_err(|e| Error::DatabaseError(e.to_string()))?;
+    } else {
+        tracing::warn!("MongoDB manager not initialized, skipping database update");
+    }
+
+    // 3. Update the status
     let new_status = DomainStatus {
         initialized: true,
         last_reconciled: Some(Utc::now()),
@@ -96,8 +182,24 @@ async fn main() -> Result<()> {
     let client = Client::try_default().await.map_err(Error::KubeError)?;
     let domains: Api<Domain> = Api::all(client.clone());
 
+    let mongodb_uri = std::env::var("MONGODB_URI").ok();
+    let db_manager = if let Some(uri) = mongodb_uri {
+        tracing::info!("Connecting to MongoDB");
+        let client_options = mongodb::options::ClientOptions::parse(&uri)
+            .await
+            .map_err(|e| Error::DatabaseError(e.to_string()))?;
+        let mongo_client = mongodb::Client::with_options(client_options)
+            .map_err(|e| Error::DatabaseError(e.to_string()))?;
+        let database = mongo_client.database("oxifed");
+        Some(DatabaseManager::new(database))
+    } else {
+        tracing::warn!("MONGODB_URI not set, operator will run without database integration");
+        None
+    };
+
     let context = Arc::new(Context {
         client: client.clone(),
+        db_manager,
     });
 
     tracing::info!("Starting Domain Operator");

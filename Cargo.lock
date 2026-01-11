@@ -2718,6 +2718,8 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "miette",
+ "mongodb",
+ "oxifed",
  "schemars 0.8.22",
  "serde",
  "serde_json",
