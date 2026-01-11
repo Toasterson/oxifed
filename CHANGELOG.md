@@ -2,11 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.6] - 2026-01-11
+
+### Miscellaneous Tasks
+
+- Integrate MongoDB support for domain reconciliation workflow
+
 ## [0.3.5] - 2026-01-11
 
 ### Miscellaneous Tasks
 
 - Handle domain deletion and improve error handling in reconcile logic
+- Release 0.3.5
 
 ## [0.3.4] - 2026-01-11
 
