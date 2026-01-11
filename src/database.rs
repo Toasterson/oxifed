@@ -757,6 +757,16 @@ impl DatabaseManager {
         Ok(result)
     }
 
+    /// Upsert a key
+    pub async fn upsert_key(&self, key: KeyDocument) -> Result<UpdateResult, DatabaseError> {
+        let collection: Collection<KeyDocument> = self.database.collection("keys");
+        let result = collection
+            .replace_one(doc! { "key_id": &key.key_id }, key)
+            .upsert(true)
+            .await?;
+        Ok(result)
+    }
+
     /// Insert a new key
     pub async fn insert_key(&self, key: KeyDocument) -> Result<ObjectId, DatabaseError> {
         let collection: Collection<KeyDocument> = self.database.collection("keys");
@@ -785,6 +795,19 @@ impl DatabaseManager {
         }
 
         Ok(keys)
+    }
+
+    /// Upsert a domain
+    pub async fn upsert_domain(
+        &self,
+        domain: DomainDocument,
+    ) -> Result<UpdateResult, DatabaseError> {
+        let collection: Collection<DomainDocument> = self.database.collection("domains");
+        let result = collection
+            .replace_one(doc! { "domain": &domain.domain }, domain)
+            .upsert(true)
+            .await?;
+        Ok(result)
     }
 
     /// Insert a new domain

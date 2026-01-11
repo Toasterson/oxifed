@@ -8,9 +8,10 @@ use kube::{Api, Client};
 use kube::{CustomResource, ResourceExt, runtime::controller::Action};
 use mongodb::bson::doc;
 use oxifed::database::{
-    DatabaseManager, DomainDocument, DomainStatus as DbDomainStatus, RegistrationMode,
+    DatabaseManager, DomainDocument, DomainStatus as DbDomainStatus, KeyDocument, KeyStatus,
+    KeyType, RegistrationMode,
 };
-use oxifed::pki::{KeyAlgorithm, KeyPair};
+use oxifed::pki::{KeyAlgorithm, KeyPair, TrustLevel};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -70,24 +71,62 @@ async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
         .await
         .map_err(Error::KubeError)?
     {
-        Some(_) => {
+        Some(secret) => {
             tracing::debug!("Secret {} already exists", secret_name);
+            // Even if secret exists, ensure key is in MongoDB
+            if let Some(ref db_manager) = ctx.db_manager {
+                if let Some(data) = secret.data {
+                    if let (Some(pub_key), Some(_priv_key)) =
+                        (data.get("public_key.pem"), data.get("private_key.pem"))
+                    {
+                        let pub_key_str = String::from_utf8_lossy(&pub_key.0).to_string();
+                        let priv_key_str = String::from_utf8_lossy(&_priv_key.0).to_string();
+
+                        let key_doc = KeyDocument {
+                            id: None,
+                            key_id: secret_name.clone(),
+                            actor_id: format!("https://{}/actor", domain.spec.hostname),
+                            key_type: KeyType::Domain,
+                            algorithm: "Ed25519".to_string(),
+                            key_size: None,
+                            public_key_pem: pub_key_str,
+                            private_key_pem: Some(priv_key_str),
+                            encryption_algorithm: None,
+                            fingerprint: "MOCK_FINGERPRINT".to_string(),
+                            trust_level: TrustLevel::MasterSigned,
+                            domain_signature: None,
+                            master_signature: None,
+                            usage: vec!["signing".to_string()],
+                            status: KeyStatus::Active,
+                            created_at: Utc::now(),
+                            expires_at: None,
+                            rotation_policy: None,
+                            domain: Some(domain.spec.hostname.clone()),
+                        };
+                        db_manager
+                            .upsert_key(key_doc)
+                            .await
+                            .map_err(|e| Error::DatabaseError(e.to_string()))?;
+                    }
+                }
+            }
         }
         None => {
             tracing::info!("Generating keys for Domain: {}", domain.name_any());
             let _key_pair = KeyPair::generate(KeyAlgorithm::Ed25519)
                 .map_err(|e| Error::PkiError(e.to_string()))?;
 
+            let pub_key_pem = "MOCK_PUBLIC_KEY".to_string();
+            let priv_key_pem = "MOCK_PRIVATE_KEY".to_string();
+
             let mut data = BTreeMap::new();
-            // In a real implementation we'd get the actual PEMs from key_pair.
-            // For now, let's use placeholders as the current pki.rs is mostly mocks anyway.
             data.insert(
                 "public_key.pem".to_string(),
-                ByteString("MOCK_PUBLIC_KEY".as_bytes().to_vec()),
+                ByteString(pub_key_pem.as_bytes().to_vec()),
             );
             data.insert(
                 "private_key.pem".to_string(),
-                ByteString("MOCK_PRIVATE_KEY".as_bytes().to_vec()),
+                ByteString(priv_key_pem.as_bytes().to_vec()),
             );
 
             let secret = Secret {
@@ -104,6 +143,34 @@ async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
                 .create(&kube::api::PostParams::default(), &secret)
                 .await
                 .map_err(Error::KubeError)?;
+
+            if let Some(ref db_manager) = ctx.db_manager {
+                let key_doc = KeyDocument {
+                    id: None,
+                    key_id: secret_name.clone(),
+                    actor_id: format!("https://{}/actor", domain.spec.hostname),
+                    key_type: KeyType::Domain,
+                    algorithm: "Ed25519".to_string(),
+                    key_size: None,
+                    public_key_pem: pub_key_pem,
+                    private_key_pem: Some(priv_key_pem),
+                    encryption_algorithm: None,
+                    fingerprint: "MOCK_FINGERPRINT".to_string(),
+                    trust_level: TrustLevel::MasterSigned,
+                    domain_signature: None,
+                    master_signature: None,
+                    usage: vec!["signing".to_string()],
+                    status: KeyStatus::Active,
+                    created_at: Utc::now(),
+                    expires_at: None,
+                    rotation_policy: None,
+                    domain: Some(domain.spec.hostname.clone()),
+                };
+                db_manager
+                    .upsert_key(key_doc)
+                    .await
+                    .map_err(|e| Error::DatabaseError(e.to_string()))?;
+            }
         }
     }
 
@@ -131,7 +198,7 @@ async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
         };
 
         db_manager
-            .insert_domain(db_domain)
+            .upsert_domain(db_domain)
             .await
             .map_err(|e| Error::DatabaseError(e.to_string()))?;
     } else {
@@ -145,8 +212,6 @@ async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
     };
 
     let patch = serde_json::json!({
-        "apiVersion": "oxifed.io/v1alpha1",
-        "kind": "Domain",
         "status": new_status
     });
 
@@ -191,7 +256,12 @@ async fn main() -> Result<()> {
         let mongo_client = mongodb::Client::with_options(client_options)
             .map_err(|e| Error::DatabaseError(e.to_string()))?;
         let database = mongo_client.database("oxifed");
-        Some(DatabaseManager::new(database))
+        let manager = DatabaseManager::new(database);
+        manager
+            .initialize()
+            .await
+            .map_err(|e| Error::DatabaseError(e.to_string()))?;
+        Some(manager)
     } else {
         tracing::warn!("MONGODB_URI not set, operator will run without database integration");
         None
