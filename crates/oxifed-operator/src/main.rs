@@ -255,7 +255,8 @@ async fn main() -> Result<()> {
             .map_err(|e| Error::DatabaseError(e.to_string()))?;
         let mongo_client = mongodb::Client::with_options(client_options)
             .map_err(|e| Error::DatabaseError(e.to_string()))?;
-        let database = mongo_client.database("oxifed");
+        let db_name = std::env::var("MONGODB_DBNAME").unwrap_or_else(|_| "domainservd".to_string());
+        let database = mongo_client.database(&db_name);
         let manager = DatabaseManager::new(database);
         manager
             .initialize()

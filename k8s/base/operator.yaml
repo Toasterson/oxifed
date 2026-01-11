@@ -31,7 +31,7 @@ spec:
         - name: RUST_LOG
           value: info
         - name: MONGODB_URI
-          value: "mongodb://root:password@mongodb:27017/oxifed?authSource=admin"
+          value: "mongodb://root:password@mongodb:27017/domainservd?authSource=admin"
 ---
 apiVersion: v1
 kind: ServiceAccount
