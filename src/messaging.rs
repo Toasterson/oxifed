@@ -44,6 +44,9 @@ pub enum MessageEnum {
     IncomingObjectMessage(IncomingObjectMessage),
     IncomingActivityMessage(IncomingActivityMessage),
     KeyGenerateMessage(KeyGenerateMessage),
+    UserCreateMessage(UserCreateMessage),
+    UserRpcRequest(UserRpcRequest),
+    UserRpcResponse(UserRpcResponse),
 }
 
 /// Message format for profile creation requests
@@ -713,5 +716,130 @@ impl KeyGenerateMessage {
 impl Message for KeyGenerateMessage {
     fn to_message(&self) -> MessageEnum {
         MessageEnum::KeyGenerateMessage(self.clone())
+    }
+}
+
+/// Message for creating a user
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserCreateMessage {
+    pub username: String,
+    pub display_name: Option<String>,
+    pub domain: String,
+}
+
+impl UserCreateMessage {
+    /// Create a new user creation message
+    pub fn new(username: String, display_name: Option<String>, domain: String) -> Self {
+        Self {
+            username,
+            display_name,
+            domain,
+        }
+    }
+}
+
+impl Message for UserCreateMessage {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::UserCreateMessage(self.clone())
+    }
+}
+
+/// RPC request message for user queries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserRpcRequest {
+    pub request_id: String,
+    pub request_type: UserRpcRequestType,
+}
+
+/// Types of user RPC requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UserRpcRequestType {
+    ListUsers,
+    GetUser { username: String },
+}
+
+impl UserRpcRequest {
+    /// Create a new user list request
+    pub fn list_users(request_id: String) -> Self {
+        Self {
+            request_id,
+            request_type: UserRpcRequestType::ListUsers,
+        }
+    }
+
+    /// Create a new user get request
+    pub fn get_user(request_id: String, username: String) -> Self {
+        Self {
+            request_id,
+            request_type: UserRpcRequestType::GetUser { username },
+        }
+    }
+}
+
+impl Message for UserRpcRequest {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::UserRpcRequest(self.clone())
+    }
+}
+
+/// RPC response message for user queries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserRpcResponse {
+    pub request_id: String,
+    pub result: UserRpcResult,
+}
+
+/// Results of user RPC requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UserRpcResult {
+    UserList { users: Vec<UserInfo> },
+    UserDetails { user: Box<Option<UserInfo>> },
+    Error { message: String },
+}
+
+/// User information for RPC responses
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserInfo {
+    pub username: String,
+    pub display_name: Option<String>,
+    pub domain: String,
+    pub actor_id: String,
+    pub public_key: Option<String>,
+    pub private_key_stored: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl UserRpcResponse {
+    /// Create a user list response
+    pub fn user_list(request_id: String, users: Vec<UserInfo>) -> Self {
+        Self {
+            request_id,
+            result: UserRpcResult::UserList { users },
+        }
+    }
+
+    /// Create a user details response
+    pub fn user_details(request_id: String, user: Option<UserInfo>) -> Self {
+        Self {
+            request_id,
+            result: UserRpcResult::UserDetails {
+                user: Box::new(user),
+            },
+        }
+    }
+
+    /// Create an error response
+    pub fn error(request_id: String, message: String) -> Self {
+        Self {
+            request_id,
+            result: UserRpcResult::Error { message },
+        }
+    }
+}
+
+impl Message for UserRpcResponse {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::UserRpcResponse(self.clone())
     }
 }

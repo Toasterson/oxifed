@@ -77,6 +77,12 @@ enum Commands {
         #[command(subcommand)]
         command: DomainCommands,
     },
+
+    /// User management
+    User {
+        #[command(subcommand)]
+        command: UserCommands,
+    },
 }
 
 /// Commands for working with Person actors
@@ -586,6 +592,34 @@ enum DomainCommands {
     },
 }
 
+/// Commands for managing users
+#[derive(Subcommand)]
+enum UserCommands {
+    /// Create a new user
+    Create {
+        /// Username (required)
+        #[arg(long, short = 'u')]
+        username: String,
+
+        /// Display name (optional, defaults to username)
+        #[arg(long, short = 'd')]
+        display_name: Option<String>,
+
+        /// Domain the user belongs to (required)
+        #[arg(long)]
+        domain: String,
+    },
+
+    /// List existing users
+    List,
+
+    /// Show user details including public key
+    Show {
+        /// Username to show
+        username: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
@@ -861,6 +895,9 @@ async fn handle_command_messaging(client: &LavinMQClient, command: &Commands) ->
         }
         Commands::Domain { command } => {
             handle_domain_command_messaging(client, command).await?;
+        }
+        Commands::User { command } => {
+            handle_user_command_messaging(client, command).await?;
         }
     }
 
@@ -1317,6 +1354,94 @@ async fn handle_domain_command_messaging(
                 }
                 Err(e) => {
                     eprintln!("Failed to get domain details: {}", e);
+                }
+            },
+            Err(e) => {
+                eprintln!("Failed to create RPC client: {}", e);
+            }
+        },
+    }
+
+    Ok(())
+}
+
+/// Handle User commands via messaging
+async fn handle_user_command_messaging(
+    client: &LavinMQClient,
+    command: &UserCommands,
+) -> Result<()> {
+    use oxifed::messaging::{UserCreateMessage, UserRpcRequest, UserRpcResponse};
+
+    match command {
+        UserCommands::Create {
+            username,
+            display_name,
+            domain,
+        } => {
+            let message = UserCreateMessage::new(
+                username.clone(),
+                display_name.clone(),
+                domain.clone(),
+            );
+
+            client.publish_message(&message).await?;
+            println!(
+                "User creation request for '{}@{}' sent to message queue",
+                username, domain
+            );
+            if let Some(display_name) = display_name {
+                println!("Display name: {}", display_name);
+            }
+        }
+
+        UserCommands::List => match client.create_rpc_client().await {
+            Ok(rpc_client) => match rpc_client.list_users().await {
+                Ok(users) => {
+                    if users.is_empty() {
+                        println!("No users found");
+                    } else {
+                        println!("Registered users:");
+                        for user in users {
+                            println!(
+                                "  {}@{} - {} ({})",
+                                user.username,
+                                user.domain,
+                                user.display_name.unwrap_or_else(|| "No display name".to_string()),
+                                user.actor_id
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to list users: {}", e);
+                }
+            },
+            Err(e) => {
+                eprintln!("Failed to create RPC client: {}", e);
+            }
+        },
+
+        UserCommands::Show { username } => match client.create_rpc_client().await {
+            Ok(rpc_client) => match rpc_client.get_user(username).await {
+                Ok(Some(user_info)) => {
+                    println!("Username: {}", user_info.username);
+                    if let Some(display_name) = &user_info.display_name {
+                        println!("Display Name: {}", display_name);
+                    }
+                    println!("Domain: {}", user_info.domain);
+                    println!("Actor ID: {}", user_info.actor_id);
+                    if let Some(public_key) = &user_info.public_key {
+                        println!("Public Key: {}", public_key);
+                    }
+                    println!("Private Key Stored: {}", user_info.private_key_stored);
+                    println!("Created: {}", user_info.created_at);
+                    println!("Updated: {}", user_info.updated_at);
+                }
+                Ok(None) => {
+                    println!("User '{}' not found", username);
+                }
+                Err(e) => {
+                    eprintln!("Failed to get user details: {}", e);
                 }
             },
             Err(e) => {

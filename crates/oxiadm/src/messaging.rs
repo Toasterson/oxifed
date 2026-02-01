@@ -9,7 +9,7 @@ use lapin::{
     options::{BasicConsumeOptions, BasicPublishOptions, QueueDeclareOptions},
 };
 use miette::{IntoDiagnostic, Result};
-use oxifed::messaging::{DomainRpcRequest, DomainRpcResponse, Message, MessageEnum};
+use oxifed::messaging::{DomainRpcRequest, DomainRpcResponse, UserRpcRequest, UserRpcResponse, Message, MessageEnum};
 use oxifed::messaging::{EXCHANGE_INTERNAL_PUBLISH, EXCHANGE_RPC_REQUEST};
 use serde::Serialize;
 use std::sync::Arc;
@@ -252,6 +252,116 @@ impl RpcClient {
         match response.result {
             oxifed::messaging::DomainRpcResult::DomainDetails { domain } => Ok(*domain),
             oxifed::messaging::DomainRpcResult::Error { message: _ } => {
+                Err(MessagingError::Confirmation) // Convert to appropriate error
+            }
+            _ => Err(MessagingError::Confirmation),
+        }
+    }
+
+    /// Send a user RPC request and wait for response
+    pub async fn send_user_rpc_request(
+        &self,
+        request: UserRpcRequest,
+    ) -> Result<UserRpcResponse, MessagingError> {
+        let channel = self.connection.create_channel().await?;
+
+        // Setup consumer for the reply queue
+        let mut consumer = channel
+            .basic_consume(
+                &self.reply_queue,
+                "",
+                BasicConsumeOptions::default(),
+                lapin::types::FieldTable::default(),
+            )
+            .await?;
+
+        // Serialize the request (wrapped in MessageEnum for server compatibility)
+        let request_data = serde_json::to_vec(&request.to_message())?;
+        let correlation_id = request.request_id.clone();
+
+        // Publish the request
+        let properties = AMQPProperties::default()
+            .with_reply_to(self.reply_queue.clone().into())
+            .with_correlation_id(correlation_id.clone().into());
+
+        channel
+            .basic_publish(
+                EXCHANGE_RPC_REQUEST,
+                "user", // routing key for user requests
+                BasicPublishOptions::default(),
+                &request_data,
+                properties,
+            )
+            .await?;
+
+        // Wait for response with timeout
+        let response_timeout = Duration::from_secs(30);
+
+        match timeout(response_timeout, async {
+            while let Some(delivery) = consumer.next().await {
+                match delivery {
+                    Ok(delivery) => {
+                        if let Some(corr_id) = delivery.properties.correlation_id()
+                            && corr_id.as_str() == correlation_id
+                        {
+                            // Found our response
+                            if let Err(e) = delivery
+                                .ack(lapin::options::BasicAckOptions::default())
+                                .await
+                            {
+                                tracing::warn!("Failed to ack user RPC response: {}", e);
+                            }
+
+                            // Parse response (also wrapped in MessageEnum)
+                            let message: MessageEnum = serde_json::from_slice(&delivery.data)?;
+                            if let MessageEnum::UserRpcResponse(response) = message {
+                                return Ok(response);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Err(MessagingError::Connection(e));
+                    }
+                }
+            }
+            Err(MessagingError::Confirmation)
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(MessagingError::Confirmation), // Timeout
+        }
+    }
+
+    /// List all users
+    pub async fn list_users(&self) -> Result<Vec<oxifed::messaging::UserInfo>, MessagingError> {
+        let request_id = Uuid::new_v4().to_string();
+        let request = UserRpcRequest::list_users(request_id);
+
+        let response = self.send_user_rpc_request(request).await?;
+
+        match response.result {
+            oxifed::messaging::UserRpcResult::UserList { users } => Ok(users),
+            oxifed::messaging::UserRpcResult::Error { message: _ } => {
+                Err(MessagingError::Confirmation) // Convert to appropriate error
+            }
+            _ => Err(MessagingError::Confirmation),
+        }
+    }
+
+    /// Get details for a specific user
+    pub async fn get_user(
+        &self,
+        username: &str,
+    ) -> Result<Option<oxifed::messaging::UserInfo>, MessagingError> {
+        let request_id = Uuid::new_v4().to_string();
+        let request = UserRpcRequest::get_user(request_id, username.to_string());
+
+        let response = self.send_user_rpc_request(request).await?;
+
+        match response.result {
+            oxifed::messaging::UserRpcResult::UserDetails { user } => Ok(*user),
+            oxifed::messaging::UserRpcResult::Error { message: _ } => {
                 Err(MessagingError::Confirmation) // Convert to appropriate error
             }
             _ => Err(MessagingError::Confirmation),
