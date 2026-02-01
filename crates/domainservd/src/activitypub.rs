@@ -198,7 +198,7 @@ async fn get_actor(
     }
 
     // Convert to ActivityPub format
-    let actor_json = json!({
+    let mut actor_json = json!({
         "@context": [
             "https://www.w3.org/ns/activitystreams",
             "https://w3id.org/security/v1",
@@ -210,7 +210,12 @@ async fn get_actor(
                     "@type": "@id"
                 },
                 "PropertyValue": "schema:PropertyValue",
-                "value": "schema:value"
+                "value": "schema:value",
+                "oxifed": "https://oxifed.org/ns#",
+                "keyChain": {
+                    "@id": "oxifed:keyChain",
+                    "@type": "@id"
+                }
             }
         ],
         "type": "Person",
@@ -234,7 +239,7 @@ async fn get_actor(
         "featured": actor_doc.featured,
         "endpoints": actor_doc.endpoints,
         "attachment": actor_doc.attachment,
-        "publicKey": actor_doc.public_key.map(|pk| json!({
+        "publicKey": actor_doc.public_key.as_ref().map(|pk| json!({
             "id": pk.id,
             "owner": pk.owner,
             "publicKeyPem": pk.public_key_pem
@@ -242,6 +247,19 @@ async fn get_actor(
         "published": actor_doc.created_at.to_rfc3339(),
         "manuallyApprovesFollowers": false
     });
+
+    // Add oxifed:keyChain extension for PKI-aware servers
+    if let Some(public_key) = &actor_doc.public_key {
+        let key_chain = json!({
+            "type": "OxifedPKI",
+            "userKey": public_key.id,
+            "domainKey": format!("https://{}/.well-known/oxifed/domain-key", domain),
+            "masterKey": format!("https://{}/.well-known/oxifed/master-key", domain),
+            "userKeyCertificate": null,  // TODO: Add actual certificate when available
+            "domainKeyCertificate": null // TODO: Add actual certificate when available
+        });
+        actor_json["oxifed:keyChain"] = key_chain;
+    }
 
     Ok((
         StatusCode::OK,
