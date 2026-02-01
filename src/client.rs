@@ -178,6 +178,30 @@ impl ActivityPubClient {
 
     /// Send an activity to an actor's inbox
     pub async fn send_to_inbox(&self, inbox_url: &Url, activity: &Activity) -> Result<()> {
+        // Try HTTPS first
+        match self.try_send_to_inbox(inbox_url, activity).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                // For localhost, try HTTP fallback if HTTPS fails
+                if inbox_url.host_str() == Some("localhost") && inbox_url.scheme() == "https" {
+                    let mut http_url = inbox_url.clone();
+                    http_url.set_scheme("http").map_err(|_| ClientError::UrlError(url::ParseError::InvalidPort))?;
+                    
+                    tracing::warn!(
+                        "HTTPS failed for localhost, trying HTTP fallback: {} -> {}",
+                        inbox_url,
+                        http_url
+                    );
+                    
+                    return self.try_send_to_inbox(&http_url, activity).await;
+                }
+                
+                Err(e)
+            }
+        }
+    }
+
+    async fn try_send_to_inbox(&self, inbox_url: &Url, activity: &Activity) -> Result<()> {
         let mut request = self
             .client
             .post(inbox_url.clone())

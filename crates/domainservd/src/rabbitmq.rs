@@ -849,18 +849,36 @@ async fn handle_follow(
         msg.actor, msg.object
     );
 
-    // Parse the object being followed to extract username
-    let (_username, domain) = split_subject(&msg.object)?;
+    // Handle actor field - if it's just a username, construct the full URL
+    let (follower_username, local_domain) = if msg.actor.contains("://") {
+        // Full URL provided
+        let follower_url = url::Url::parse(&msg.actor).map_err(RabbitMQError::URLParse)?;
+        let domain = follower_url.host_str().ok_or_else(|| {
+            RabbitMQError::JsonError(serde_json::Error::custom(format!(
+                "Invalid domain in actor URL: {}",
+                msg.actor
+            )))
+        })?;
+        let path_segments: Vec<&str> = follower_url.path_segments().map(|segments| segments.collect()).unwrap_or_default();
+        let username = path_segments.last().copied().unwrap_or("unknown");
+        (username.to_string(), domain.to_string())
+    } else {
+        // Just username provided, use default local domain
+        // For now, we'll use "testfed.local" as the default domain for testing
+        // In production, this should come from configuration
+        (msg.actor.clone(), "testfed.local".to_string())
+    };
 
-    // Verify the domain exists
-    if !does_domain_exist(&domain, db).await {
-        return Err(RabbitMQError::DomainNotFound(
-            "Domain not found".to_string(),
-        ));
+    // Verify the local domain exists (where the follower is from)
+    if !does_domain_exist(&local_domain, db).await {
+        return Err(RabbitMQError::DomainNotFound(format!(
+            "Local domain not found: {}",
+            local_domain
+        )));
     }
 
     // Extract actor IDs and create timestamp
-    let follower_actor_id = msg.actor.clone();
+    let follower_actor_id = format!("https://{}/users/{}", local_domain, follower_username);
     let target_actor_id = msg.object.clone();
     let now = chrono::Utc::now();
 
@@ -870,15 +888,15 @@ async fn handle_follow(
         id: Some(
             url::Url::parse(&format!(
                 "https://{}/activities/{}",
-                domain,
+                local_domain,
                 uuid::Uuid::new_v4()
             ))
             .map_err(RabbitMQError::URLParse)?,
         ),
         name: None,
-        summary: Some(format!("{} follows {}", msg.actor, msg.object)),
+        summary: Some(format!("{} follows {}", follower_actor_id, msg.object)),
         actor: Some(oxifed::ObjectOrLink::Url(
-            url::Url::parse(&msg.actor).map_err(RabbitMQError::URLParse)?,
+            url::Url::parse(&follower_actor_id).map_err(RabbitMQError::URLParse)?,
         )),
         object: Some(oxifed::ObjectOrLink::Url(
             url::Url::parse(&msg.object).map_err(RabbitMQError::URLParse)?,
@@ -926,32 +944,11 @@ async fn handle_follow(
         .await
         .map_err(|e| RabbitMQError::DbError(crate::db::DbError::DatabaseError(e)))?;
 
-    // Fetch the actor being followed to get their inbox
-    let client = oxifed::client::ActivityPubClient::new()?;
-
-    let object_url = url::Url::parse(&msg.object).map_err(RabbitMQError::URLParse)?;
-    match client.fetch_actor(&object_url).await {
-        Ok(actor) => {
-            // Get the actor's inbox URL
-            if let Some(serde_json::Value::String(inbox_url)) =
-                actor.additional_properties.get("inbox")
-            {
-                let inbox = url::Url::parse(inbox_url).map_err(RabbitMQError::URLParse)?;
-
-                // Send the Follow activity to the target actor's inbox
-                if let Err(e) = client.send_to_inbox(&inbox, &follow_activity).await {
-                    error!(
-                        "Failed to send Follow activity to inbox {}: {}",
-                        inbox_url, e
-                    );
-                } else {
-                    info!("Follow activity sent to {}", inbox_url);
-                }
-            }
-        }
-        Err(e) => {
-            error!("Failed to fetch actor {}: {}", msg.object, e);
-        }
+    // Publish the activity to the ActivityPub exchange for publisherd to handle
+    if let Err(e) = publish_activity_to_activitypub_exchange(&follow_activity).await {
+        error!("Failed to publish Follow activity to ActivityPub exchange: {}", e);
+    } else {
+        info!("Follow activity published to ActivityPub exchange for delivery");
     }
 
     // The actual follower relationship will be established when we receive
