@@ -295,6 +295,17 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
         )
         .await?;
 
+    // Also bind user requests to the same queue
+    channel
+        .queue_bind(
+            QUEUE_RPC_DOMAIN,
+            EXCHANGE_RPC_REQUEST,
+            "user", // routing key for user requests
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+
     info!("RabbitMQ exchanges and queues initialized successfully");
     Ok(())
 }
