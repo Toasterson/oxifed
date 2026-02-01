@@ -1,0 +1,42 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/activitystreams",
+    "https://w3id.org/security/v1",
+    "https://schema.org",
+    {
+      "manuallyApprovesFollowers": "as:manuallyApprovesFollowers",
+      "PropertyValue": "schema:PropertyValue",
+      "value": "schema:value",
+      "oxifed": "https://oxifed.org/ns#",
+      "keyChain": {
+        "@id": "oxifed:keyChain",
+        "@type": "@id"
+      }
+    }
+  ],
+  "type": "Person",
+  "id": "https://localhost:8080/users/testuser",
+  "name": "Test User",
+  "preferredUsername": "testuser",
+  "summary": "A test user for federation testing",
+  "inbox": "https://localhost:8080/users/testuser/inbox",
+  "outbox": "https://localhost:8080/users/testuser/outbox",
+  "following": "https://localhost:8080/users/testuser/following",
+  "followers": "https://localhost:8080/users/testuser/followers",
+  "liked": "https://localhost:8080/users/testuser/liked",
+  "featured": "https://localhost:8080/users/testuser/featured",
+  "publicKey": {
+    "id": "https://localhost:8080/users/testuser#main-key",
+    "owner": "https://localhost:8080/users/testuser",
+    "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...\n-----END PUBLIC KEY-----"
+  },
+  "oxifed:keyChain": {
+    "type": "OxifedPKI",
+    "userKey": "https://localhost:8080/users/testuser#main-key",
+    "domainKey": "https://localhost:8080/.well-known/oxifed/domain-key",
+    "masterKey": "https://localhost:8080/.well-known/oxifed/master-key",
+    "userKeyCertificate": null,
+    "domainKeyCertificate": null
+  },
+  "manuallyApprovesFollowers": false
+}

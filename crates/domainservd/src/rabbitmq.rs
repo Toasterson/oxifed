@@ -18,7 +18,8 @@ use oxifed::messaging::{
     AcceptActivityMessage, AnnounceActivityMessage, DomainInfo, DomainRpcResponse,
     FollowActivityMessage, KeyGenerateMessage, LikeActivityMessage, Message, MessageEnum,
     NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
-    ProfileDeleteMessage, ProfileUpdateMessage, RejectActivityMessage,
+    ProfileDeleteMessage, ProfileUpdateMessage, RejectActivityMessage, UserCreateMessage,
+    UserRpcRequest, UserRpcResponse,
 };
 use oxifed::messaging::{
     EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INCOMING_PROCESS, EXCHANGE_INTERNAL_PUBLISH,
@@ -468,6 +469,11 @@ async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQE
             );
             Ok(())
         }
+        MessageEnum::UserCreateMessage(msg) => create_user(db, &msg).await,
+        MessageEnum::UserRpcRequest(_) | MessageEnum::UserRpcResponse(_) => {
+            warn!("User RPC messages should be handled by RPC handler, not message processor");
+            Ok(())
+        }
     }
 }
 
@@ -611,9 +617,53 @@ async fn process_rpc_message(
         }
     };
 
-    // Extract the RPC request from the message envelope
-    let request = match message {
-        MessageEnum::DomainRpcRequest(req) => req,
+    // Define a unified response type for RPC handling
+    enum RpcResponse {
+        Domain(oxifed::messaging::DomainRpcResponse),
+        User(oxifed::messaging::UserRpcResponse),
+    }
+
+    impl RpcResponse {
+        fn to_message(&self) -> MessageEnum {
+            match self {
+                RpcResponse::Domain(resp) => resp.to_message(),
+                RpcResponse::User(resp) => resp.to_message(),
+            }
+        }
+    }
+
+    // Extract the RPC request from the message envelope and process it
+    let response = match message {
+        MessageEnum::DomainRpcRequest(req) => {
+            info!(
+                "Processing domain RPC request: {} (type: {:?})",
+                req.request_id, req.request_type
+            );
+
+            RpcResponse::Domain(match req.request_type {
+                oxifed::messaging::DomainRpcRequestType::ListDomains => {
+                    handle_list_domains_rpc(db, &req.request_id).await
+                }
+                oxifed::messaging::DomainRpcRequestType::GetDomain { domain } => {
+                    handle_get_domain_rpc(db, &req.request_id, &domain).await
+                }
+            })
+        }
+        MessageEnum::UserRpcRequest(req) => {
+            info!(
+                "Processing user RPC request: {} (type: {:?})",
+                req.request_id, req.request_type
+            );
+
+            RpcResponse::User(match req.request_type {
+                oxifed::messaging::UserRpcRequestType::ListUsers => {
+                    handle_list_users_rpc(db, &req.request_id).await
+                }
+                oxifed::messaging::UserRpcRequestType::GetUser { username } => {
+                    handle_get_user_rpc(db, &req.request_id, &username).await
+                }
+            })
+        }
         MessageEnum::IncomingObjectMessage(_) | MessageEnum::IncomingActivityMessage(_) => {
             warn!("Incoming messages should not be processed by RPC handler");
             return Ok(());
@@ -624,28 +674,15 @@ async fn process_rpc_message(
         }
     };
 
-    info!(
-        "Processing RPC request: {} (type: {:?})",
-        request.request_id, request.request_type
-    );
-
-    // Process the request
-    let response = match request.request_type {
-        oxifed::messaging::DomainRpcRequestType::ListDomains => {
-            handle_list_domains_rpc(db, &request.request_id).await
-        }
-        oxifed::messaging::DomainRpcRequestType::GetDomain { domain } => {
-            handle_get_domain_rpc(db, &request.request_id, &domain).await
-        }
-    };
+    // Response is already processed above
 
     // Send response back to the client
     if let Some(reply_to) = &properties.reply_to() {
-        let default_correlation_id = request.request_id.clone().into();
         let correlation_id = properties
             .correlation_id()
             .as_ref()
-            .unwrap_or(&default_correlation_id);
+            .map(|id| id.clone())
+            .unwrap_or_else(|| "unknown".to_string().into());
 
         let response_data = match serde_json::to_vec(&response.to_message()) {
             Ok(data) => data,
@@ -670,10 +707,10 @@ async fn process_rpc_message(
         {
             error!("Failed to send RPC response: {}", e);
         } else {
-            info!("RPC response sent for request: {}", request.request_id);
+            info!("RPC response sent successfully");
         }
     } else {
-        warn!("RPC request {} has no reply_to queue", request.request_id);
+        warn!("RPC request has no reply_to queue");
     }
 
     Ok(())
@@ -2096,5 +2133,241 @@ async fn delete_domain_object(
         }
     }
 
+    Ok(())
+}
+
+/// Handle list users RPC request
+async fn handle_list_users_rpc(
+    db: &Arc<MongoDB>,
+    request_id: &str,
+) -> oxifed::messaging::UserRpcResponse {
+    // For now, implement a basic version that queries the collection directly
+    let collection: mongodb::Collection<oxifed::database::ActorDocument> = 
+        db.database().collection("actors");
+    
+    match collection
+        .find(mongodb::bson::doc! { "local": true })
+        .limit(100) // Limit to prevent overwhelming responses
+        .await
+    {
+        Ok(mut cursor) => {
+            let mut users = Vec::new();
+            
+            while let Ok(Some(actor)) = futures::TryStreamExt::try_next(&mut cursor).await {
+                let public_key = actor.public_key.as_ref().map(|pk| pk.public_key_pem.clone());
+                let private_key_stored = actor.public_key.is_some();
+                
+                let user_info = oxifed::messaging::UserInfo {
+                    username: actor.preferred_username,
+                    display_name: if actor.name.is_empty() {
+                        None
+                    } else {
+                        Some(actor.name)
+                    },
+                    domain: actor.domain,
+                    actor_id: actor.actor_id,
+                    public_key,
+                    private_key_stored,
+                    created_at: actor.created_at.to_rfc3339(),
+                    updated_at: actor.updated_at.to_rfc3339(),
+                };
+                users.push(user_info);
+            }
+
+            oxifed::messaging::UserRpcResponse::user_list(request_id.to_string(), users)
+        }
+        Err(e) => {
+            error!("Failed to list users: {}", e);
+            oxifed::messaging::UserRpcResponse::error(
+                request_id.to_string(),
+                format!("Failed to list users: {}", e),
+            )
+        }
+    }
+}
+
+/// Handle get user RPC request
+async fn handle_get_user_rpc(
+    db: &Arc<MongoDB>,
+    request_id: &str,
+    username: &str,
+) -> oxifed::messaging::UserRpcResponse {
+    // Try to parse username@domain format first
+    let (user, domain) = if username.contains('@') {
+        let parts: Vec<&str> = username.split('@').collect();
+        if parts.len() == 2 {
+            (parts[0], parts[1])
+        } else {
+            return oxifed::messaging::UserRpcResponse::error(
+                request_id.to_string(),
+                format!("Invalid username format: {}", username),
+            );
+        }
+    } else {
+        // If no domain specified, we need to search all domains
+        // For now, return an error asking for full username@domain
+        return oxifed::messaging::UserRpcResponse::error(
+            request_id.to_string(),
+            "Please specify username in format: username@domain".to_string(),
+        );
+    };
+
+    match db.manager().find_actor_by_username(user, domain).await {
+        Ok(Some(actor)) => {
+            let public_key = actor.public_key.as_ref().map(|pk| pk.public_key_pem.clone());
+            let private_key_stored = actor.public_key.is_some();
+            
+            let user_info = oxifed::messaging::UserInfo {
+                username: actor.preferred_username,
+                display_name: if actor.name.is_empty() {
+                    None
+                } else {
+                    Some(actor.name)
+                },
+                domain: actor.domain,
+                actor_id: actor.actor_id,
+                public_key,
+                private_key_stored,
+                created_at: actor.created_at.to_rfc3339(),
+                updated_at: actor.updated_at.to_rfc3339(),
+            };
+
+            oxifed::messaging::UserRpcResponse::user_details(
+                request_id.to_string(),
+                Some(user_info),
+            )
+        }
+        Ok(None) => oxifed::messaging::UserRpcResponse::user_details(
+            request_id.to_string(),
+            None,
+        ),
+        Err(e) => {
+            error!("Failed to get user '{}': {}", username, e);
+            oxifed::messaging::UserRpcResponse::error(
+                request_id.to_string(),
+                format!("Failed to get user '{}': {}", username, e),
+            )
+        }
+    }
+}
+
+/// Create a user with auto-generated keypair
+async fn create_user(db: &Arc<MongoDB>, message: &UserCreateMessage) -> Result<(), RabbitMQError> {
+    let username = &message.username;
+    let domain = &message.domain;
+
+    // Check if domain exists
+    if !does_domain_exist(domain, db).await {
+        return Err(RabbitMQError::DomainNotFound(domain.clone()));
+    }
+
+    // Create the actor ID
+    let actor_id = format!("https://{}/users/{}", domain, username);
+
+    // Check if user already exists
+    let existing_actor = db
+        .find_actor_by_id(&actor_id)
+        .await
+        .map_err(RabbitMQError::DbError)?;
+
+    if existing_actor.is_some() {
+        error!("User '{}' already exists on domain '{}'", username, domain);
+        return Err(RabbitMQError::ConstraintError(format!(
+            "User '{}' already exists on domain '{}'",
+            username, domain
+        )));
+    }
+
+    // Current time for creation timestamp
+    let now = chrono::Utc::now();
+
+    // Create endpoints map
+    let mut endpoints = std::collections::HashMap::new();
+    endpoints.insert(
+        "sharedInbox".to_string(),
+        format!("https://{}/sharedInbox", domain),
+    );
+
+    // Generate a key for the user
+    let mut pki_manager = PkiManager::new();
+    let public_key_doc =
+        match pki_manager.generate_user_key(actor_id.clone(), KeyAlgorithm::Ed25519) {
+            Ok(user_key) => {
+                info!(
+                    "Key generated successfully for user: {}, key ID: {}",
+                    actor_id, user_key.key_id
+                );
+
+                // Convert to PublicKeyDocument
+                Some(oxifed::database::PublicKeyDocument {
+                    id: user_key.key_id.clone(),
+                    owner: actor_id.clone(),
+                    public_key_pem: user_key.public_key.pem_data.clone(),
+                    algorithm: match user_key.public_key.algorithm {
+                        KeyAlgorithm::Rsa { key_size } => {
+                            format!("rsa-{}", key_size)
+                        }
+                        KeyAlgorithm::Ed25519 => "ed25519".to_string(),
+                    },
+                    key_size: match user_key.public_key.algorithm {
+                        KeyAlgorithm::Rsa { key_size } => Some(key_size),
+                        KeyAlgorithm::Ed25519 => None,
+                    },
+                    fingerprint: user_key.public_key.fingerprint.clone(),
+                    created_at: now,
+                })
+            }
+            Err(e) => {
+                error!("Failed to generate key for user {}: {}", actor_id, e);
+                None
+            }
+        };
+
+    // Use display_name or default to username
+    let display_name = message.display_name.clone().unwrap_or_else(|| username.clone());
+
+    // Create the actor document
+    let actor_doc = oxifed::database::ActorDocument {
+        id: None,
+        actor_id: actor_id.clone(),
+        name: display_name,
+        preferred_username: username.clone(),
+        domain: domain.clone(),
+        actor_type: "Person".to_string(),
+        summary: None,
+        icon: None,
+        image: None,
+        inbox: format!("https://{}/users/{}/inbox", domain, username),
+        outbox: format!("https://{}/users/{}/outbox", domain, username),
+        following: format!("https://{}/users/{}/following", domain, username),
+        followers: format!("https://{}/users/{}/followers", domain, username),
+        liked: Some(format!("https://{}/users/{}/liked", domain, username)),
+        featured: Some(format!("https://{}/users/{}/featured", domain, username)),
+        public_key: public_key_doc,
+        endpoints: Some(mongodb::bson::to_document(&endpoints).unwrap_or_default()),
+        attachment: None,
+        additional_properties: None,
+        status: oxifed::database::ActorStatus::Active,
+        created_at: now,
+        updated_at: now,
+        local: true,
+        followers_count: 0,
+        following_count: 0,
+        statuses_count: 0,
+    };
+
+    // Insert the actor into the database
+    db.manager().insert_actor(actor_doc).await.map_err(|e| {
+        error!("Failed to insert user '{}': {}", username, e);
+        RabbitMQError::DatabaseError(e)
+    })?;
+
+    // Create webfinger profile
+    let subject = format!("{}@{}", username, domain);
+    let aliases = vec![format!("https://{}/@{}", domain, username)];
+
+    create_webfinger_profile(db, &subject, Some(aliases), None).await?;
+
+    info!("User '{}@{}' created successfully", username, domain);
     Ok(())
 }
