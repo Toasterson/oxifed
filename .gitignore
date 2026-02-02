@@ -1,1 +1,10 @@
 /target
+
+# Agent files - managed at workspace root, not in repository
+SOUL.md
+AGENTS.md
+IDENTITY.md
+HEARTBEAT.md
+TOOLS.md
+USER.md
+memory/
