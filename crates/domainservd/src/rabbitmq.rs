@@ -859,7 +859,10 @@ async fn handle_follow(
                 msg.actor
             )))
         })?;
-        let path_segments: Vec<&str> = follower_url.path_segments().map(|segments| segments.collect()).unwrap_or_default();
+        let path_segments: Vec<&str> = follower_url
+            .path_segments()
+            .map(|segments| segments.collect())
+            .unwrap_or_default();
         let username = path_segments.last().copied().unwrap_or("unknown");
         (username.to_string(), domain.to_string())
     } else {
@@ -946,7 +949,10 @@ async fn handle_follow(
 
     // Publish the activity to the ActivityPub exchange for publisherd to handle
     if let Err(e) = publish_activity_to_activitypub_exchange(&follow_activity).await {
-        error!("Failed to publish Follow activity to ActivityPub exchange: {}", e);
+        error!(
+            "Failed to publish Follow activity to ActivityPub exchange: {}",
+            e
+        );
     } else {
         info!("Follow activity published to ActivityPub exchange for delivery");
     }
@@ -2150,9 +2156,9 @@ async fn handle_list_users_rpc(
     request_id: &str,
 ) -> oxifed::messaging::UserRpcResponse {
     // For now, implement a basic version that queries the collection directly
-    let collection: mongodb::Collection<oxifed::database::ActorDocument> = 
+    let collection: mongodb::Collection<oxifed::database::ActorDocument> =
         db.database().collection("actors");
-    
+
     match collection
         .find(mongodb::bson::doc! { "local": true })
         .limit(100) // Limit to prevent overwhelming responses
@@ -2160,11 +2166,14 @@ async fn handle_list_users_rpc(
     {
         Ok(mut cursor) => {
             let mut users = Vec::new();
-            
+
             while let Ok(Some(actor)) = futures::TryStreamExt::try_next(&mut cursor).await {
-                let public_key = actor.public_key.as_ref().map(|pk| pk.public_key_pem.clone());
+                let public_key = actor
+                    .public_key
+                    .as_ref()
+                    .map(|pk| pk.public_key_pem.clone());
                 let private_key_stored = actor.public_key.is_some();
-                
+
                 let user_info = oxifed::messaging::UserInfo {
                     username: actor.preferred_username,
                     display_name: if actor.name.is_empty() {
@@ -2222,9 +2231,12 @@ async fn handle_get_user_rpc(
 
     match db.manager().find_actor_by_username(user, domain).await {
         Ok(Some(actor)) => {
-            let public_key = actor.public_key.as_ref().map(|pk| pk.public_key_pem.clone());
+            let public_key = actor
+                .public_key
+                .as_ref()
+                .map(|pk| pk.public_key_pem.clone());
             let private_key_stored = actor.public_key.is_some();
-            
+
             let user_info = oxifed::messaging::UserInfo {
                 username: actor.preferred_username,
                 display_name: if actor.name.is_empty() {
@@ -2245,10 +2257,7 @@ async fn handle_get_user_rpc(
                 Some(user_info),
             )
         }
-        Ok(None) => oxifed::messaging::UserRpcResponse::user_details(
-            request_id.to_string(),
-            None,
-        ),
+        Ok(None) => oxifed::messaging::UserRpcResponse::user_details(request_id.to_string(), None),
         Err(e) => {
             error!("Failed to get user '{}': {}", username, e);
             oxifed::messaging::UserRpcResponse::error(
@@ -2332,7 +2341,10 @@ async fn create_user(db: &Arc<MongoDB>, message: &UserCreateMessage) -> Result<(
         };
 
     // Use display_name or default to username
-    let display_name = message.display_name.clone().unwrap_or_else(|| username.clone());
+    let display_name = message
+        .display_name
+        .clone()
+        .unwrap_or_else(|| username.clone());
 
     // Create the actor document
     let actor_doc = oxifed::database::ActorDocument {

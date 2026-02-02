@@ -9,7 +9,9 @@ use lapin::{
     options::{BasicConsumeOptions, BasicPublishOptions, QueueDeclareOptions},
 };
 use miette::{IntoDiagnostic, Result};
-use oxifed::messaging::{DomainRpcRequest, DomainRpcResponse, UserRpcRequest, UserRpcResponse, Message, MessageEnum};
+use oxifed::messaging::{
+    DomainRpcRequest, DomainRpcResponse, Message, MessageEnum, UserRpcRequest, UserRpcResponse,
+};
 use oxifed::messaging::{EXCHANGE_INTERNAL_PUBLISH, EXCHANGE_RPC_REQUEST};
 use serde::Serialize;
 use std::sync::Arc;

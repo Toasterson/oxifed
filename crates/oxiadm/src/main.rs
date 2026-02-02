@@ -1378,11 +1378,8 @@ async fn handle_user_command_messaging(
             display_name,
             domain,
         } => {
-            let message = UserCreateMessage::new(
-                username.clone(),
-                display_name.clone(),
-                domain.clone(),
-            );
+            let message =
+                UserCreateMessage::new(username.clone(), display_name.clone(), domain.clone());
 
             client.publish_message(&message).await?;
             println!(
@@ -1406,7 +1403,8 @@ async fn handle_user_command_messaging(
                                 "  {}@{} - {} ({})",
                                 user.username,
                                 user.domain,
-                                user.display_name.unwrap_or_else(|| "No display name".to_string()),
+                                user.display_name
+                                    .unwrap_or_else(|| "No display name".to_string()),
                                 user.actor_id
                             );
                         }
