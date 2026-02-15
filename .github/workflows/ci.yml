@@ -81,7 +81,7 @@ jobs:
 
     strategy:
       matrix:
-        service: [domainservd, publisherd, oxifed-operator]
+        service: [domainservd, adminservd, publisherd, oxifed-operator]
 
     steps:
       - name: Checkout code
