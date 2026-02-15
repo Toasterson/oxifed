@@ -1,0 +1,345 @@
+//! OIDC Device Code Grant flow for oxiadm
+//!
+//! Implements the OAuth 2.0 Device Authorization Grant (RFC 8628) using
+//! plain HTTP requests via reqwest. Discovers endpoints from OIDC metadata.
+
+use chrono::Utc;
+use miette::{IntoDiagnostic, Result, miette};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+
+use crate::context::{self, AuthContext};
+
+/// OIDC discovery document (subset of fields we need)
+#[derive(Deserialize)]
+struct OidcMetadata {
+    token_endpoint: String,
+    device_authorization_endpoint: Option<String>,
+}
+
+/// Device authorization response
+#[derive(Deserialize)]
+struct DeviceAuthResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    verification_uri_complete: Option<String>,
+    #[serde(default = "default_interval")]
+    interval: u64,
+    expires_in: u64,
+}
+
+fn default_interval() -> u64 {
+    5
+}
+
+/// Token response
+#[derive(Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_in: Option<u64>,
+}
+
+/// Token error response
+#[derive(Deserialize)]
+struct TokenErrorResponse {
+    error: String,
+    error_description: Option<String>,
+}
+
+/// Token poll request body
+#[derive(Serialize)]
+struct DeviceTokenRequest<'a> {
+    grant_type: &'a str,
+    device_code: &'a str,
+    client_id: &'a str,
+}
+
+/// Refresh token request body
+#[derive(Serialize)]
+struct RefreshTokenRequest<'a> {
+    grant_type: &'a str,
+    refresh_token: &'a str,
+    client_id: &'a str,
+}
+
+/// Discover OIDC metadata from the issuer URL
+async fn discover_metadata(client: &reqwest::Client, issuer_url: &str) -> Result<OidcMetadata> {
+    let well_known = format!(
+        "{}/.well-known/openid-configuration",
+        issuer_url.trim_end_matches('/')
+    );
+
+    let response = client
+        .get(&well_known)
+        .send()
+        .await
+        .into_diagnostic()
+        .map_err(|e| miette!("Failed to fetch OIDC metadata: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(miette!(
+            help = "Check that the issuer URL is correct and the OIDC provider is reachable",
+            "OIDC discovery failed with status {}",
+            response.status()
+        ));
+    }
+
+    response
+        .json::<OidcMetadata>()
+        .await
+        .into_diagnostic()
+        .map_err(|e| miette!("Failed to parse OIDC metadata: {}", e))
+}
+
+/// Perform Device Code Grant login flow
+pub async fn device_code_login(issuer_url: &str, client_id: &str) -> Result<()> {
+    let client = reqwest::Client::new();
+
+    // Discover OIDC endpoints
+    let metadata = discover_metadata(&client, issuer_url).await?;
+
+    let device_auth_endpoint = metadata.device_authorization_endpoint.ok_or_else(|| {
+        miette!(
+            help = "The OIDC provider may not support the Device Authorization Grant. \
+                    Check with your identity provider.",
+            "OIDC provider does not advertise a device_authorization_endpoint"
+        )
+    })?;
+
+    // Request device authorization
+    let response = client
+        .post(&device_auth_endpoint)
+        .form(&[("client_id", client_id), ("scope", "openid profile")])
+        .send()
+        .await
+        .into_diagnostic()
+        .map_err(|e| miette!("Device authorization request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(miette!("Device authorization request failed: {}", body));
+    }
+
+    let device_auth: DeviceAuthResponse = response
+        .json()
+        .await
+        .into_diagnostic()
+        .map_err(|e| miette!("Failed to parse device authorization response: {}", e))?;
+
+    // Display instructions to the user
+    println!();
+    println!("To authenticate, visit: {}", device_auth.verification_uri);
+    if let Some(ref complete_uri) = device_auth.verification_uri_complete {
+        println!("Or open: {}", complete_uri);
+    }
+    println!("Enter code: {}", device_auth.user_code);
+    println!();
+    println!("Waiting for authorization...");
+
+    // Poll for the token
+    let poll_interval = Duration::from_secs(device_auth.interval);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(device_auth.expires_in);
+
+    let token_response = loop {
+        tokio::time::sleep(poll_interval).await;
+
+        if tokio::time::Instant::now() > deadline {
+            return Err(miette!(
+                help = format!(
+                    "Try again with: oxiadm login --issuer-url {} --client-id {}",
+                    issuer_url, client_id
+                ),
+                "Device authorization timed out"
+            ));
+        }
+
+        let response = client
+            .post(&metadata.token_endpoint)
+            .form(&DeviceTokenRequest {
+                grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+                device_code: &device_auth.device_code,
+                client_id,
+            })
+            .send()
+            .await
+            .into_diagnostic()
+            .map_err(|e| miette!("Token poll request failed: {}", e))?;
+
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .into_diagnostic()
+            .map_err(|e| miette!("Failed to read token response: {}", e))?;
+
+        if status.is_success() {
+            let token: TokenResponse = serde_json::from_str(&body)
+                .into_diagnostic()
+                .map_err(|e| miette!("Failed to parse token response: {}", e))?;
+            break token;
+        }
+
+        // Check if we should keep polling
+        if let Ok(error) = serde_json::from_str::<TokenErrorResponse>(&body) {
+            match error.error.as_str() {
+                "authorization_pending" => continue,
+                "slow_down" => {
+                    // Back off
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+                "expired_token" => {
+                    return Err(miette!(
+                        help = format!(
+                            "Try again with: oxiadm login --issuer-url {} --client-id {}",
+                            issuer_url, client_id
+                        ),
+                        "Device code expired before authorization was completed"
+                    ));
+                }
+                "access_denied" => {
+                    return Err(miette!("Authorization was denied by the user"));
+                }
+                _ => {
+                    let desc = error.error_description.unwrap_or_default();
+                    return Err(miette!("Token exchange failed: {} {}", error.error, desc));
+                }
+            }
+        } else {
+            return Err(miette!(
+                "Unexpected token endpoint response ({}): {}",
+                status,
+                body
+            ));
+        }
+    };
+
+    // Calculate expiry
+    let expires_at = token_response.expires_in.map(|secs| {
+        let expiry = Utc::now() + chrono::Duration::seconds(secs as i64);
+        expiry.to_rfc3339()
+    });
+
+    // Save tokens to context
+    let mut ctx = context::load_context()?;
+    ctx.auth = AuthContext {
+        issuer_url: Some(issuer_url.to_string()),
+        client_id: Some(client_id.to_string()),
+        access_token: Some(token_response.access_token),
+        refresh_token: token_response.refresh_token,
+        expires_at,
+    };
+    context::save_context(&ctx)?;
+
+    println!("Login successful!");
+    Ok(())
+}
+
+/// Refresh the access token if it's expired or about to expire
+pub async fn refresh_token_if_needed() -> Result<()> {
+    let ctx = context::load_context()?;
+
+    // Check if we have a token at all
+    if ctx.auth.access_token.is_none() {
+        return Err(miette!(
+            help = "Log in first with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            "No access token found — you are not logged in"
+        ));
+    }
+
+    // Check if token is expired
+    let needs_refresh = if let Some(ref expires_at) = ctx.auth.expires_at {
+        match chrono::DateTime::parse_from_rfc3339(expires_at) {
+            Ok(expiry) => {
+                // Refresh if token expires within 60 seconds
+                Utc::now() + chrono::Duration::seconds(60) > expiry
+            }
+            Err(_) => true,
+        }
+    } else {
+        false // No expiry info, assume it's valid
+    };
+
+    if !needs_refresh {
+        return Ok(());
+    }
+
+    // Need to refresh
+    let refresh_token = ctx.auth.refresh_token.as_ref().ok_or_else(|| {
+        miette!(
+            help = "Log in again with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            "Token expired and no refresh token available"
+        )
+    })?;
+
+    let issuer_url = ctx.auth.issuer_url.as_ref().ok_or_else(|| {
+        miette!(
+            help = "Log in again with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            "No issuer URL stored — cannot refresh token"
+        )
+    })?;
+
+    let client_id = ctx.auth.client_id.as_ref().ok_or_else(|| {
+        miette!(
+            help = "Log in again with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            "No client ID stored — cannot refresh token"
+        )
+    })?;
+
+    let http_client = reqwest::Client::new();
+    let metadata = discover_metadata(&http_client, issuer_url).await?;
+
+    let response = http_client
+        .post(&metadata.token_endpoint)
+        .form(&RefreshTokenRequest {
+            grant_type: "refresh_token",
+            refresh_token,
+            client_id,
+        })
+        .send()
+        .await
+        .into_diagnostic()
+        .map_err(|e| miette!("Token refresh request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(miette!(
+            help = "Log in again with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            "Token refresh failed: {}",
+            body
+        ));
+    }
+
+    let token_response: TokenResponse = response
+        .json()
+        .await
+        .into_diagnostic()
+        .map_err(|e| miette!("Failed to parse token refresh response: {}", e))?;
+
+    let expires_at = token_response.expires_in.map(|secs| {
+        let expiry = Utc::now() + chrono::Duration::seconds(secs as i64);
+        expiry.to_rfc3339()
+    });
+
+    let mut ctx = context::load_context()?;
+    ctx.auth.access_token = Some(token_response.access_token);
+    if let Some(new_refresh) = token_response.refresh_token {
+        ctx.auth.refresh_token = Some(new_refresh);
+    }
+    ctx.auth.expires_at = expires_at;
+    context::save_context(&ctx)?;
+
+    tracing::debug!("Token refreshed successfully");
+    Ok(())
+}
+
+/// Clear auth tokens from context
+pub fn logout() -> Result<()> {
+    let mut ctx = context::load_context()?;
+    ctx.auth = AuthContext::default();
+    context::save_context(&ctx)?;
+    println!("Logged out successfully");
+    Ok(())
+}

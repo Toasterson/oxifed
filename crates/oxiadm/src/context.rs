@@ -1,7 +1,8 @@
 //! Persistent actor context for oxiadm
 //!
-//! Stores the current actor identity at `$XDG_CONFIG_HOME/oxiadm/context.toml`
-//! so that it doesn't need to be specified on every command.
+//! Stores the current actor identity and auth tokens at
+//! `$XDG_CONFIG_HOME/oxiadm/context.toml` so that they don't need
+//! to be specified on every command.
 
 use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
@@ -11,12 +12,28 @@ use std::path::PathBuf;
 pub struct OxiadmContext {
     #[serde(default)]
     pub context: ContextInner,
+    #[serde(default)]
+    pub auth: AuthContext,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ContextInner {
     /// The current actor identity (e.g. "toasterson@aopc.cloud")
     pub actor: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct AuthContext {
+    /// OIDC issuer URL
+    pub issuer_url: Option<String>,
+    /// OIDC client ID
+    pub client_id: Option<String>,
+    /// OAuth2 access token
+    pub access_token: Option<String>,
+    /// OAuth2 refresh token
+    pub refresh_token: Option<String>,
+    /// Token expiry time (RFC 3339)
+    pub expires_at: Option<String>,
 }
 
 /// Returns the path to the context file: `$XDG_CONFIG_HOME/oxiadm/context.toml`
@@ -67,6 +84,17 @@ pub fn get_current_actor() -> Result<String> {
         miette!(
             help = "Set a default actor with: oxiadm context set user@domain",
             "No actor context is set and no --actor flag was provided"
+        )
+    })
+}
+
+/// Get the stored access token, returning a diagnostic error if not logged in.
+pub fn get_access_token() -> Result<String> {
+    let ctx = load_context()?;
+    ctx.auth.access_token.ok_or_else(|| {
+        miette!(
+            help = "Log in first with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            "No access token found — you are not logged in"
         )
     })
 }

@@ -1,24 +1,20 @@
+mod auth;
+mod client;
 mod context;
-mod messaging;
 mod resolve;
 
 use clap::{Parser, Subcommand};
-use messaging::LavinMQClient;
+use client::AdminApiClient;
 use miette::{Context, IntoDiagnostic, Result};
-use oxifed::messaging::KeyGenerateMessage;
 
 /// Oxifed Admin CLI tool for managing profiles
 #[derive(Parser)]
 #[command(name = "oxiadm")]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// LavinMQ connection string
-    #[arg(
-        long,
-        env = "AMQP_URL",
-        default_value = "amqp://guest:guest@localhost:5672"
-    )]
-    amqp_url: String,
+    /// Admin API URL
+    #[arg(long, env = "OXIADM_API_URL", default_value = "http://localhost:8081")]
+    api_url: String,
 
     #[command(subcommand)]
     command: Commands,
@@ -91,6 +87,20 @@ enum Commands {
         #[command(subcommand)]
         command: ContextCommands,
     },
+
+    /// Authenticate with the admin API using OIDC Device Code Grant
+    Login {
+        /// OIDC issuer URL (e.g. https://id.example.com)
+        #[arg(long)]
+        issuer_url: String,
+
+        /// OIDC client ID
+        #[arg(long)]
+        client_id: String,
+    },
+
+    /// Clear stored authentication tokens
+    Logout,
 }
 
 /// Commands for working with Person actors
@@ -654,20 +664,288 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Handle context commands before creating AMQP connection (no network needed)
-    if let Commands::Context { command } = &cli.command {
-        return handle_context_command(command);
+    // Handle commands that don't need network
+    match &cli.command {
+        Commands::Context { command } => return handle_context_command(command),
+        Commands::Login {
+            issuer_url,
+            client_id,
+        } => return auth::device_code_login(issuer_url, client_id).await,
+        Commands::Logout => return auth::logout(),
+        _ => {}
     }
 
-    // Use messaging via LavinMQ
-    let lavin_client = LavinMQClient::new(&cli.amqp_url).await?;
-    handle_command_messaging(&lavin_client, &cli.command).await?;
+    // Refresh token if needed, then create API client
+    auth::refresh_token_if_needed().await?;
+    let access_token = context::get_access_token()?;
+    let api_client = AdminApiClient::new(&cli.api_url, access_token).await?;
+
+    handle_command(&api_client, &cli.command).await?;
 
     Ok(())
 }
 
-/// Handle Key commands via messaging
-async fn handle_key_command_messaging(client: &LavinMQClient, command: &KeyCommands) -> Result<()> {
+/// Handle context commands (no network needed)
+fn handle_context_command(command: &ContextCommands) -> Result<()> {
+    match command {
+        ContextCommands::Set { actor } => {
+            let mut ctx = context::load_context()?;
+            ctx.context.actor = Some(actor.clone());
+            context::save_context(&ctx)?;
+            println!("Actor context set to: {}", actor);
+        }
+        ContextCommands::Show => {
+            let ctx = context::load_context()?;
+            match ctx.context.actor {
+                Some(actor) => println!("{}", actor),
+                None => println!("No actor context set. Use: oxiadm context set user@domain"),
+            }
+        }
+        ContextCommands::Clear => {
+            let mut ctx = context::load_context()?;
+            ctx.context.actor = None;
+            context::save_context(&ctx)?;
+            println!("Actor context cleared");
+        }
+    }
+    Ok(())
+}
+
+/// Handle all commands that require the API client
+async fn handle_command(client: &AdminApiClient, command: &Commands) -> Result<()> {
+    match command {
+        Commands::Person { command } | Commands::Profile { command } => {
+            handle_person_command(client, command).await?;
+        }
+        Commands::Note { command } => {
+            handle_note_command(client, command).await?;
+        }
+        Commands::Activity { command } => {
+            handle_activity_command(client, command).await?;
+        }
+        Commands::Keys { command } => {
+            handle_key_command(client, command).await?;
+        }
+        Commands::Pki { command } => {
+            handle_pki_command(command)?;
+        }
+        Commands::System { command } => {
+            handle_system_command(command)?;
+        }
+        Commands::Test { command } => {
+            handle_test_command(command)?;
+        }
+        Commands::Domain { command } => {
+            handle_domain_command(client, command).await?;
+        }
+        Commands::User { command } => {
+            handle_user_command(client, command).await?;
+        }
+        Commands::Context { .. } | Commands::Login { .. } | Commands::Logout => {
+            unreachable!("Handled before API client creation");
+        }
+    }
+    Ok(())
+}
+
+/// Handle Person actor commands
+async fn handle_person_command(client: &AdminApiClient, command: &PersonCommands) -> Result<()> {
+    match command {
+        PersonCommands::Create {
+            subject,
+            summary,
+            icon,
+            properties,
+        } => {
+            let formatted_subject = format_subject(subject);
+
+            let props = if let Some(props_json) = properties {
+                Some(
+                    serde_json::from_str(props_json)
+                        .into_diagnostic()
+                        .wrap_err("Failed to parse custom properties JSON")?,
+                )
+            } else {
+                None
+            };
+
+            let message = oxifed::messaging::ProfileCreateMessage::new(
+                formatted_subject.clone(),
+                summary.clone(),
+                icon.clone(),
+                props,
+            );
+
+            client.create_person(&message).await?;
+            println!("Person creation request for '{}' sent", formatted_subject);
+        }
+
+        PersonCommands::Update {
+            id,
+            summary,
+            icon,
+            properties,
+        } => {
+            let props = if let Some(props_json) = properties {
+                Some(
+                    serde_json::from_str(props_json)
+                        .into_diagnostic()
+                        .wrap_err("Failed to parse custom properties JSON")?,
+                )
+            } else {
+                None
+            };
+
+            let message = oxifed::messaging::ProfileUpdateMessage::new(
+                id.clone(),
+                summary.clone(),
+                icon.clone(),
+                props,
+            );
+
+            client.update_person(&message).await?;
+            println!("Person update request for ID '{}' sent", id);
+        }
+
+        PersonCommands::Delete { id, force } => {
+            client.delete_person(id, *force).await?;
+            println!("Person deletion request for ID '{}' sent", id);
+            if *force {
+                println!("Forced deletion requested");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle Note object commands
+async fn handle_note_command(client: &AdminApiClient, command: &NoteCommands) -> Result<()> {
+    match command {
+        NoteCommands::Create {
+            author,
+            content,
+            summary,
+            mentions,
+            tags,
+            properties,
+        } => {
+            let props = if let Some(props_json) = properties {
+                Some(
+                    serde_json::from_str(props_json)
+                        .into_diagnostic()
+                        .wrap_err("Failed to parse custom properties JSON")?,
+                )
+            } else {
+                None
+            };
+
+            let message = oxifed::messaging::NoteCreateMessage::new(
+                author.clone(),
+                content.clone(),
+                summary.clone(),
+                mentions.clone(),
+                tags.clone(),
+                props,
+            );
+
+            client.create_note(&message).await?;
+            println!("Note creation request by '{}' sent", author);
+        }
+
+        NoteCommands::Update {
+            id,
+            content,
+            summary,
+            tags,
+            properties,
+        } => {
+            let props = if let Some(props_json) = properties {
+                Some(
+                    serde_json::from_str(props_json)
+                        .into_diagnostic()
+                        .wrap_err("Failed to parse custom properties JSON")?,
+                )
+            } else {
+                None
+            };
+
+            let message = oxifed::messaging::NoteUpdateMessage::new(
+                id.clone(),
+                content.clone(),
+                summary.clone(),
+                tags.clone(),
+                props,
+            );
+
+            client.update_note(&message).await?;
+            println!("Note update request for ID '{}' sent", id);
+        }
+
+        NoteCommands::Delete { id, force } => {
+            client.delete_note(id, *force).await?;
+            println!("Note deletion request for ID '{}' sent", id);
+            if *force {
+                println!("Forced deletion requested");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle Activity commands
+async fn handle_activity_command(
+    client: &AdminApiClient,
+    command: &ActivityCommands,
+) -> Result<()> {
+    match command {
+        ActivityCommands::Follow { actor, object } => {
+            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
+            let resolved_object = resolve::resolve_target(object).await?;
+
+            client.follow(&resolved_actor, &resolved_object).await?;
+            println!(
+                "'Follow' activity from '{}' for '{}' sent",
+                resolved_actor, resolved_object
+            );
+        }
+
+        ActivityCommands::Like { actor, object } => {
+            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
+            let resolved_object = resolve::resolve_target(object).await?;
+
+            client.like(&resolved_actor, &resolved_object).await?;
+            println!(
+                "'Like' activity from '{}' for '{}' sent",
+                resolved_actor, resolved_object
+            );
+        }
+
+        ActivityCommands::Announce {
+            actor,
+            object,
+            to,
+            cc,
+        } => {
+            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
+            let resolved_object = resolve::resolve_target(object).await?;
+
+            client
+                .announce(&resolved_actor, &resolved_object, to.clone(), cc.clone())
+                .await?;
+            println!(
+                "'Announce' activity from '{}' for '{}' sent",
+                resolved_actor, resolved_object
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle Key commands
+async fn handle_key_command(client: &AdminApiClient, command: &KeyCommands) -> Result<()> {
     match command {
         KeyCommands::Generate {
             actor,
@@ -679,12 +957,8 @@ async fn handle_key_command_messaging(client: &LavinMQClient, command: &KeyComma
                 println!("Key size: {}", size);
             }
 
-            // Create and send key generation message
-            let key_gen_message =
-                KeyGenerateMessage::new(actor.clone(), algorithm.clone(), *key_size);
-
-            client.publish_message(&key_gen_message).await?;
-            println!("Key generation request sent to PKI service");
+            client.generate_key(actor, algorithm, *key_size).await?;
+            println!("Key generation request sent");
         }
 
         KeyCommands::Import {
@@ -746,11 +1020,8 @@ async fn handle_key_command_messaging(client: &LavinMQClient, command: &KeyComma
     Ok(())
 }
 
-/// Handle PKI commands via messaging
-async fn handle_pki_command_messaging(
-    _client: &LavinMQClient,
-    command: &PkiCommands,
-) -> Result<()> {
+/// Handle PKI commands (mostly stubs for now)
+fn handle_pki_command(command: &PkiCommands) -> Result<()> {
     match command {
         PkiCommands::InitMaster { key_size, output } => {
             println!("Initializing master key with size {} bits", key_size);
@@ -810,11 +1081,8 @@ async fn handle_pki_command_messaging(
     Ok(())
 }
 
-/// Handle System commands via messaging
-async fn handle_system_command_messaging(
-    _client: &LavinMQClient,
-    command: &SystemCommands,
-) -> Result<()> {
+/// Handle System commands (mostly stubs for now)
+fn handle_system_command(command: &SystemCommands) -> Result<()> {
     match command {
         SystemCommands::Health => {
             println!("Checking system health");
@@ -864,11 +1132,8 @@ async fn handle_system_command_messaging(
     Ok(())
 }
 
-/// Handle Test commands via messaging
-async fn handle_test_command_messaging(
-    _client: &LavinMQClient,
-    command: &TestCommands,
-) -> Result<()> {
+/// Handle Test commands (stubs)
+fn handle_test_command(command: &TestCommands) -> Result<()> {
     match command {
         TestCommands::Signatures { actor, target } => {
             println!(
@@ -901,377 +1166,9 @@ async fn handle_test_command_messaging(
     Ok(())
 }
 
-/// Handle commands using messaging
-async fn handle_command_messaging(client: &LavinMQClient, command: &Commands) -> Result<()> {
-    match command {
-        Commands::Person { command } | Commands::Profile { command } => {
-            handle_person_command_messaging(client, command).await?;
-        }
-        Commands::Note { command } => {
-            handle_note_command_messaging(client, command).await?;
-        }
-        Commands::Activity { command } => {
-            handle_activity_command_messaging(client, command).await?;
-        }
-        Commands::Keys { command } => {
-            handle_key_command_messaging(client, command).await?;
-        }
-        Commands::Pki { command } => {
-            handle_pki_command_messaging(client, command).await?;
-        }
-        Commands::System { command } => {
-            handle_system_command_messaging(client, command).await?;
-        }
-        Commands::Test { command } => {
-            handle_test_command_messaging(client, command).await?;
-        }
-        Commands::Domain { command } => {
-            handle_domain_command_messaging(client, command).await?;
-        }
-        Commands::User { command } => {
-            handle_user_command_messaging(client, command).await?;
-        }
-        Commands::Context { .. } => {
-            // Already handled before AMQP connection in main()
-            unreachable!("Context commands are handled before AMQP connection");
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle context commands (no network needed)
-fn handle_context_command(command: &ContextCommands) -> Result<()> {
-    match command {
-        ContextCommands::Set { actor } => {
-            let ctx = context::OxiadmContext {
-                context: context::ContextInner {
-                    actor: Some(actor.clone()),
-                },
-            };
-            context::save_context(&ctx)?;
-            println!("Actor context set to: {}", actor);
-        }
-        ContextCommands::Show => {
-            let ctx = context::load_context()?;
-            match ctx.context.actor {
-                Some(actor) => println!("{}", actor),
-                None => println!("No actor context set. Use: oxiadm context set user@domain"),
-            }
-        }
-        ContextCommands::Clear => {
-            let ctx = context::OxiadmContext::default();
-            context::save_context(&ctx)?;
-            println!("Actor context cleared");
-        }
-    }
-    Ok(())
-}
-
-/// Handle Person actor commands via messaging
-async fn handle_person_command_messaging(
-    client: &LavinMQClient,
-    command: &PersonCommands,
-) -> Result<()> {
-    match command {
-        PersonCommands::Create {
-            subject,
-            summary,
-            icon,
-            properties,
-        } => {
-            // Format subject with appropriate prefix if needed
-            let formatted_subject = format_subject(subject);
-
-            // Parse custom properties if provided
-            let props = if let Some(props_json) = properties {
-                Some(
-                    serde_json::from_str(props_json)
-                        .into_diagnostic()
-                        .wrap_err("Failed to parse custom properties JSON")?,
-                )
-            } else {
-                None
-            };
-
-            // Create a structured message for Person creation
-            let message = oxifed::messaging::ProfileCreateMessage::new(
-                formatted_subject.clone(),
-                summary.clone(),
-                icon.clone(),
-                props,
-            );
-
-            // Send to LavinMQ
-            client
-                .publish_message(&message)
-                .await
-                .into_diagnostic()
-                .wrap_err("Failed to publish Person creation message to LavinMQ")?;
-
-            println!(
-                "Person creation request for '{}' sent to message queue",
-                formatted_subject
-            );
-        }
-
-        PersonCommands::Update {
-            id,
-            summary,
-            icon,
-            properties,
-        } => {
-            // Parse custom properties if provided
-            let props = if let Some(props_json) = properties {
-                Some(
-                    serde_json::from_str(props_json)
-                        .into_diagnostic()
-                        .wrap_err("Failed to parse custom properties JSON")?,
-                )
-            } else {
-                None
-            };
-
-            // Create a structured message for Person update
-            let message = oxifed::messaging::ProfileUpdateMessage::new(
-                id.clone(),
-                summary.clone(),
-                icon.clone(),
-                props,
-            );
-
-            // Send to LavinMQ
-            client
-                .publish_message(&message)
-                .await
-                .into_diagnostic()
-                .wrap_err("Failed to publish Person update message to LavinMQ")?;
-
-            println!(
-                "Person update request for ID '{}' sent to message queue",
-                id
-            );
-        }
-
-        PersonCommands::Delete { id, force } => {
-            // Create a structured message for Person deletion
-            let message = oxifed::messaging::ProfileDeleteMessage::new(id.clone(), *force);
-
-            // Send to LavinMQ
-            client
-                .publish_message(&message)
-                .await
-                .into_diagnostic()
-                .wrap_err("Failed to publish Person deletion message to LavinMQ")?;
-
-            println!(
-                "Person deletion request for ID '{}' sent to message queue",
-                id
-            );
-            if *force {
-                println!("Forced deletion requested");
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle Note object commands via messaging
-async fn handle_note_command_messaging(
-    client: &LavinMQClient,
-    command: &NoteCommands,
-) -> Result<()> {
-    match command {
-        NoteCommands::Create {
-            author,
-            content,
-            summary,
-            mentions,
-            tags,
-            properties,
-        } => {
-            // Parse custom properties if provided
-            let props = if let Some(props_json) = properties {
-                Some(
-                    serde_json::from_str(props_json)
-                        .into_diagnostic()
-                        .wrap_err("Failed to parse custom properties JSON")?,
-                )
-            } else {
-                None
-            };
-
-            // Create a structured message for Note creation
-            let message = oxifed::messaging::NoteCreateMessage::new(
-                author.clone(),
-                content.clone(),
-                summary.clone(),
-                mentions.clone(),
-                tags.clone(),
-                props,
-            );
-
-            // Send to LavinMQ
-            client
-                .publish_message(&message)
-                .await
-                .into_diagnostic()
-                .wrap_err("Failed to publish Note creation message to LavinMQ")?;
-
-            println!(
-                "Note creation request by '{}' sent to message queue",
-                author
-            );
-        }
-
-        NoteCommands::Update {
-            id,
-            content,
-            summary,
-            tags,
-            properties,
-        } => {
-            // Parse custom properties if provided
-            let props = if let Some(props_json) = properties {
-                Some(
-                    serde_json::from_str(props_json)
-                        .into_diagnostic()
-                        .wrap_err("Failed to parse custom properties JSON")?,
-                )
-            } else {
-                None
-            };
-
-            // Create a structured message for Note update
-            let message = oxifed::messaging::NoteUpdateMessage::new(
-                id.clone(),
-                content.clone(),
-                summary.clone(),
-                tags.clone(),
-                props,
-            );
-
-            // Send to LavinMQ
-            client
-                .publish_message(&message)
-                .await
-                .into_diagnostic()
-                .wrap_err("Failed to publish Note update message to LavinMQ")?;
-
-            println!("Note update request for ID '{}' sent to message queue", id);
-        }
-
-        NoteCommands::Delete { id, force } => {
-            // Create a structured message for Note deletion
-            let message = oxifed::messaging::NoteDeleteMessage::new(id.clone(), *force);
-
-            // Send to LavinMQ
-            client
-                .publish_message(&message)
-                .await
-                .into_diagnostic()
-                .wrap_err("Failed to publish Note deletion message to LavinMQ")?;
-
-            println!(
-                "Note deletion request for ID '{}' sent to message queue",
-                id
-            );
-            if *force {
-                println!("Forced deletion requested");
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle Activity commands via messaging
-async fn handle_activity_command_messaging(
-    client: &LavinMQClient,
-    command: &ActivityCommands,
-) -> Result<()> {
-    match command {
-        ActivityCommands::Follow { actor, object } => {
-            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
-            let resolved_object = resolve::resolve_target(object).await?;
-
-            let message = oxifed::messaging::FollowActivityMessage::new(
-                resolved_actor.clone(),
-                resolved_object.clone(),
-            );
-
-            client
-                .publish_message(&message)
-                .await
-                .into_diagnostic()
-                .wrap_err("Failed to publish Follow activity message to LavinMQ")?;
-
-            println!(
-                "'Follow' activity request from '{}' for object '{}' sent to message queue",
-                resolved_actor, resolved_object
-            );
-        }
-
-        ActivityCommands::Like { actor, object } => {
-            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
-            let resolved_object = resolve::resolve_target(object).await?;
-
-            let message = oxifed::messaging::LikeActivityMessage::new(
-                resolved_actor.clone(),
-                resolved_object.clone(),
-            );
-
-            client
-                .publish_message(&message)
-                .await
-                .into_diagnostic()
-                .wrap_err("Failed to publish Like activity message to LavinMQ")?;
-
-            println!(
-                "'Like' activity request from '{}' for object '{}' sent to message queue",
-                resolved_actor, resolved_object
-            );
-        }
-
-        ActivityCommands::Announce {
-            actor,
-            object,
-            to,
-            cc,
-        } => {
-            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
-            let resolved_object = resolve::resolve_target(object).await?;
-
-            let message = oxifed::messaging::AnnounceActivityMessage::new(
-                resolved_actor.clone(),
-                resolved_object.clone(),
-                to.clone(),
-                cc.clone(),
-            );
-
-            client
-                .publish_message(&message)
-                .await
-                .into_diagnostic()
-                .wrap_err("Failed to publish Announce activity message to LavinMQ")?;
-
-            println!(
-                "'Announce' activity request from '{}' for object '{}' sent to message queue",
-                resolved_actor, resolved_object
-            );
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle Domain commands via messaging
-async fn handle_domain_command_messaging(
-    client: &LavinMQClient,
-    command: &DomainCommands,
-) -> Result<()> {
-    use oxifed::messaging::{DomainCreateMessage, DomainDeleteMessage, DomainUpdateMessage};
+/// Handle Domain commands
+async fn handle_domain_command(client: &AdminApiClient, command: &DomainCommands) -> Result<()> {
+    use oxifed::messaging::{DomainCreateMessage, DomainUpdateMessage};
 
     match command {
         DomainCommands::Create {
@@ -1287,7 +1184,6 @@ async fn handle_domain_command_messaging(
             allowed_file_types,
             properties,
         } => {
-            // Parse custom properties if provided
             let props = if let Some(props_json) = properties {
                 Some(
                     serde_json::from_str(props_json)
@@ -1311,7 +1207,7 @@ async fn handle_domain_command_messaging(
                 props,
             );
 
-            client.publish_message(&message).await?;
+            client.create_domain(&message).await?;
             println!("Domain creation request sent for: {}", domain);
         }
 
@@ -1328,7 +1224,6 @@ async fn handle_domain_command_messaging(
             allowed_file_types,
             properties,
         } => {
-            // Parse custom properties if provided
             let props = if let Some(props_json) = properties {
                 Some(
                     serde_json::from_str(props_json)
@@ -1352,95 +1247,76 @@ async fn handle_domain_command_messaging(
                 props,
             );
 
-            client.publish_message(&message).await?;
+            client.update_domain(&message).await?;
             println!("Domain update request sent for: {}", domain);
         }
 
         DomainCommands::Delete { domain, force } => {
-            let message = DomainDeleteMessage::new(domain.clone(), *force);
-
-            client.publish_message(&message).await?;
+            client.delete_domain(domain, *force).await?;
             println!("Domain deletion request sent for: {}", domain);
             if *force {
-                println!("Force deletion enabled - domain will be deleted without confirmation");
+                println!("Force deletion enabled — domain will be deleted without confirmation");
             }
         }
 
-        DomainCommands::List => match client.create_rpc_client().await {
-            Ok(rpc_client) => match rpc_client.list_domains().await {
-                Ok(domains) => {
-                    if domains.is_empty() {
-                        println!("No domains registered");
-                    } else {
-                        println!("Registered domains:");
-                        for domain in domains {
-                            println!(
-                                "  {} - {} ({})",
-                                domain.domain,
-                                domain.name.unwrap_or_else(|| "No name".to_string()),
-                                domain.status
-                            );
-                        }
-                    }
+        DomainCommands::List => {
+            let domains = client.list_domains().await?;
+            if domains.is_empty() {
+                println!("No domains registered");
+            } else {
+                println!("Registered domains:");
+                for domain in domains {
+                    println!(
+                        "  {} - {} ({})",
+                        domain.domain,
+                        domain.name.unwrap_or_else(|| "No name".to_string()),
+                        domain.status
+                    );
                 }
-                Err(e) => {
-                    eprintln!("Failed to list domains: {}", e);
-                }
-            },
-            Err(e) => {
-                eprintln!("Failed to create RPC client: {}", e);
             }
-        },
+        }
 
-        DomainCommands::Show { domain } => match client.create_rpc_client().await {
-            Ok(rpc_client) => match rpc_client.get_domain(domain).await {
-                Ok(Some(domain_info)) => {
-                    println!("Domain: {}", domain_info.domain);
-                    if let Some(name) = &domain_info.name {
+        DomainCommands::Show { domain } => {
+            let domain_info = client.get_domain(domain).await?;
+            match domain_info {
+                Some(d) => {
+                    println!("Domain: {}", d.domain);
+                    if let Some(name) = &d.name {
                         println!("Name: {}", name);
                     }
-                    if let Some(description) = &domain_info.description {
+                    if let Some(description) = &d.description {
                         println!("Description: {}", description);
                     }
-                    if let Some(contact_email) = &domain_info.contact_email {
+                    if let Some(contact_email) = &d.contact_email {
                         println!("Contact Email: {}", contact_email);
                     }
-                    println!("Registration Mode: {}", domain_info.registration_mode);
-                    println!("Authorized Fetch: {}", domain_info.authorized_fetch);
-                    if let Some(max_note_length) = domain_info.max_note_length {
+                    println!("Registration Mode: {}", d.registration_mode);
+                    println!("Authorized Fetch: {}", d.authorized_fetch);
+                    if let Some(max_note_length) = d.max_note_length {
                         println!("Max Note Length: {}", max_note_length);
                     }
-                    if let Some(max_file_size) = domain_info.max_file_size {
+                    if let Some(max_file_size) = d.max_file_size {
                         println!("Max File Size: {} bytes", max_file_size);
                     }
-                    if let Some(allowed_file_types) = &domain_info.allowed_file_types {
+                    if let Some(allowed_file_types) = &d.allowed_file_types {
                         println!("Allowed File Types: {}", allowed_file_types.join(", "));
                     }
-                    println!("Status: {}", domain_info.status);
-                    println!("Created: {}", domain_info.created_at);
-                    println!("Updated: {}", domain_info.updated_at);
+                    println!("Status: {}", d.status);
+                    println!("Created: {}", d.created_at);
+                    println!("Updated: {}", d.updated_at);
                 }
-                Ok(None) => {
+                None => {
                     println!("Domain '{}' not found", domain);
                 }
-                Err(e) => {
-                    eprintln!("Failed to get domain details: {}", e);
-                }
-            },
-            Err(e) => {
-                eprintln!("Failed to create RPC client: {}", e);
             }
-        },
+        }
     }
 
     Ok(())
 }
 
-/// Handle User commands via messaging
-async fn handle_user_command_messaging(
-    client: &LavinMQClient,
-    command: &UserCommands,
-) -> Result<()> {
+/// Handle User commands
+async fn handle_user_command(client: &AdminApiClient, command: &UserCommands) -> Result<()> {
     use oxifed::messaging::UserCreateMessage;
 
     match command {
@@ -1452,71 +1328,54 @@ async fn handle_user_command_messaging(
             let message =
                 UserCreateMessage::new(username.clone(), display_name.clone(), domain.clone());
 
-            client.publish_message(&message).await?;
-            println!(
-                "User creation request for '{}@{}' sent to message queue",
-                username, domain
-            );
+            client.create_user(&message).await?;
+            println!("User creation request for '{}@{}' sent", username, domain);
             if let Some(display_name) = display_name {
                 println!("Display name: {}", display_name);
             }
         }
 
-        UserCommands::List => match client.create_rpc_client().await {
-            Ok(rpc_client) => match rpc_client.list_users().await {
-                Ok(users) => {
-                    if users.is_empty() {
-                        println!("No users found");
-                    } else {
-                        println!("Registered users:");
-                        for user in users {
-                            println!(
-                                "  {}@{} - {} ({})",
-                                user.username,
-                                user.domain,
-                                user.display_name
-                                    .unwrap_or_else(|| "No display name".to_string()),
-                                user.actor_id
-                            );
-                        }
-                    }
+        UserCommands::List => {
+            let users = client.list_users().await?;
+            if users.is_empty() {
+                println!("No users found");
+            } else {
+                println!("Registered users:");
+                for user in users {
+                    println!(
+                        "  {}@{} - {} ({})",
+                        user.username,
+                        user.domain,
+                        user.display_name
+                            .unwrap_or_else(|| "No display name".to_string()),
+                        user.actor_id
+                    );
                 }
-                Err(e) => {
-                    eprintln!("Failed to list users: {}", e);
-                }
-            },
-            Err(e) => {
-                eprintln!("Failed to create RPC client: {}", e);
             }
-        },
+        }
 
-        UserCommands::Show { username } => match client.create_rpc_client().await {
-            Ok(rpc_client) => match rpc_client.get_user(username).await {
-                Ok(Some(user_info)) => {
-                    println!("Username: {}", user_info.username);
-                    if let Some(display_name) = &user_info.display_name {
+        UserCommands::Show { username } => {
+            let user_info = client.get_user(username).await?;
+            match user_info {
+                Some(u) => {
+                    println!("Username: {}", u.username);
+                    if let Some(display_name) = &u.display_name {
                         println!("Display Name: {}", display_name);
                     }
-                    println!("Domain: {}", user_info.domain);
-                    println!("Actor ID: {}", user_info.actor_id);
-                    if let Some(public_key) = &user_info.public_key {
+                    println!("Domain: {}", u.domain);
+                    println!("Actor ID: {}", u.actor_id);
+                    if let Some(public_key) = &u.public_key {
                         println!("Public Key: {}", public_key);
                     }
-                    println!("Private Key Stored: {}", user_info.private_key_stored);
-                    println!("Created: {}", user_info.created_at);
-                    println!("Updated: {}", user_info.updated_at);
+                    println!("Private Key Stored: {}", u.private_key_stored);
+                    println!("Created: {}", u.created_at);
+                    println!("Updated: {}", u.updated_at);
                 }
-                Ok(None) => {
+                None => {
                     println!("User '{}' not found", username);
                 }
-                Err(e) => {
-                    eprintln!("Failed to get user details: {}", e);
-                }
-            },
-            Err(e) => {
-                eprintln!("Failed to create RPC client: {}", e);
             }
-        },
+        }
     }
 
     Ok(())
@@ -1524,11 +1383,8 @@ async fn handle_user_command_messaging(
 
 /// Ensure the subject has an appropriate prefix
 fn format_subject(subject: &str) -> String {
-    // If the subject already has a protocol prefix, return it as is
     if subject.starts_with("acct:") || subject.starts_with("https://") || subject.contains(':') {
         return subject.to_string();
     }
-
-    // Otherwise, add the acct: prefix
     format!("acct:{}", subject)
 }

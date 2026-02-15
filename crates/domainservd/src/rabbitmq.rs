@@ -915,10 +915,12 @@ async fn handle_follow(
         // user@domain format
         split_subject(&msg.actor)?
     } else {
-        return Err(RabbitMQError::JsonError(serde_json::Error::custom(format!(
-            "Actor '{}' must be a full URL or user@domain format",
-            msg.actor
-        ))));
+        return Err(RabbitMQError::JsonError(serde_json::Error::custom(
+            format!(
+                "Actor '{}' must be a full URL or user@domain format",
+                msg.actor
+            ),
+        )));
     };
 
     // Verify the local domain exists (where the follower is from)

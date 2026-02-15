@@ -41,6 +41,23 @@ services:
       - RUST_LOG=info
     restart: unless-stopped
 
+  adminservd:
+    build:
+      context: .
+      dockerfile: docker/adminservd/Dockerfile
+    container_name: adminservd
+    ports:
+      - "8081:8081"
+    depends_on:
+      - lavinmq
+    environment:
+      - TZ=UTC
+      - RUST_LOG=info
+      - OIDC_ISSUER_URL=https://id.example.com
+      - OIDC_AUDIENCE=oxifed-admin
+      - BIND_ADDRESS=0.0.0.0:8081
+    restart: unless-stopped
+
   publisherd:
     build:
       context: .
