@@ -85,13 +85,13 @@ cargo run --bin oxiadm -- migrate --from {PREVIOUS_VERSION}
 ### 🧪 Testing & Compatibility
 
 #### Tested Platforms
-- ✅ Mastodon 4.2.0+
-- ✅ Pleroma 2.5.0+
-- ✅ PeerTube 5.0.0+
-- ⚠️ Limited testing with other platforms
+- Oxifed-to-Oxifed: E2E test suite
+- snac2: E2E interop tests
+- Mitra: E2E interop tests
+- Other platforms: untested
 
 #### System Requirements
-- Rust 1.70+
+- Rust nightly (edition 2024)
 - MongoDB 6.0+
 - RabbitMQ 3.11+
 - Docker & Docker Compose (for development)
@@ -110,7 +110,7 @@ cargo run --bin oxiadm -- migrate --from {PREVIOUS_VERSION}
 
 ### 📚 Documentation Updates
 - Updated [DESIGN.md](docs/DESIGN.md) with new architectural decisions
-- Enhanced [ARCHITECTURE.md](docs/ARCHITECTURE.md) with implementation details
+- Enhanced [ARCHITECTURE_DESIGN.md](docs/ARCHITECTURE_DESIGN.md) with implementation details
 - New API documentation for endpoints
 - Updated deployment guides
 

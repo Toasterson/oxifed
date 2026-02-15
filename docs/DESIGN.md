@@ -1,22 +1,24 @@
 # Oxifed ActivityPub Platform Design Document
 
+> **This document describes the intended design of Oxifed. Not all features described here are implemented.** See [DOCUMENTATION.md](../DOCUMENTATION.md) for current project status and what works today.
+
 ## 1. Executive Summary
 
-Oxifed is a comprehensive ActivityPub platform designed to enable federated social networking through a modular, microservices-based architecture. The platform provides the foundational infrastructure for building ActivityPub-compliant applications including microblogging, long-form blogging, and personal portfolio sites.
+Oxifed is an ActivityPub federation server designed as a modular, microservices-based system. It provides infrastructure for hosting multiple domains on a single instance with ActivityPub endpoints, message queue-based communication, and HTTP signature support.
 
 ### Vision
-To create a flexible, scalable, and extensible ActivityPub platform that enables developers and users to build federated social applications while maintaining full compatibility with the broader Fediverse ecosystem.
+To create a modular ActivityPub server that enables hosting multiple domains with federation support.
 
 ### Core Principles
 - **Federation First**: Built from the ground up for ActivityPub federation
 - **Modular Architecture**: Component-based design allowing selective deployment
 - **Extensibility**: Plugin architecture for custom object types and activities
 - **Scalability**: Designed to handle multiple domains and high throughput
-- **Standards Compliance**: Full ActivityPub specification compliance
+- **Standards Compliance**: ActivityPub specification (partial implementation)
 
 ## 2. Architecture Overview
 
-### 2.1 System Components
+### 2.1 System Components [IMPLEMENTED]
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -60,7 +62,7 @@ To create a flexible, scalable, and extensible ActivityPub platform that enables
                     └─────────────────────────┘
 ```
 
-### 2.2 Core Daemons
+### 2.2 Core Daemons [IMPLEMENTED]
 
 #### domainservd
 The central ActivityPub server daemon that handles:
@@ -87,7 +89,7 @@ Command-line administration tool providing:
 - **System Administration**: Domain management and configuration
 - **Testing Interface**: Smoke testing and federation verification
 
-### 2.3 Infrastructure Components
+### 2.3 Infrastructure Components [IMPLEMENTED]
 
 #### Message Queue (RabbitMQ)
 - **Internal Communication**: Inter-service messaging using defined exchanges
@@ -106,9 +108,11 @@ Command-line administration tool providing:
 - **Domain Configuration**: Multi-domain settings and routing rules
 - **Relationship Management**: Follower/following graphs and social connections
 
-## 3. Application Layer Design
+## 3. Application Layer Design [PLANNED]
 
-### 3.1 Notes-Based Microblogging Application
+> None of the application platforms described in this section are implemented. Oxifed currently provides the core ActivityPub server infrastructure only.
+
+### 3.1 Notes-Based Microblogging Application [PLANNED]
 
 #### Overview
 A Twitter/Mastodon-style microblogging platform built on Oxifed infrastructure.
@@ -121,7 +125,7 @@ A Twitter/Mastodon-style microblogging platform built on Oxifed infrastructure.
 - **Hashtag System**: Topic discovery and trending analysis
 - **Thread Support**: Conversation threading and context preservation
 
-#### Technical Implementation
+#### Technical Implementation (planned, not in codebase)
 ```rust
 pub struct MicroblogNote {
     pub id: String,
@@ -143,14 +147,14 @@ pub enum Visibility {
 }
 ```
 
-#### API Endpoints
+#### API Endpoints (planned, not implemented)
 - `POST /api/v1/statuses` - Create new note
 - `GET /api/v1/timelines/home` - User's home timeline
 - `GET /api/v1/timelines/public` - Public timeline
 - `POST /api/v1/statuses/:id/favourite` - Like a note
 - `POST /api/v1/statuses/:id/reblog` - Boost a note
 
-### 3.2 Article-Based Blogging Platform
+### 3.2 Article-Based Blogging Platform [PLANNED]
 
 #### Overview
 A Medium/Ghost-style long-form publishing platform with ActivityPub federation.
@@ -163,7 +167,7 @@ A Medium/Ghost-style long-form publishing platform with ActivityPub federation.
 - **Collaboration**: Multi-author support and editorial workflows
 - **SEO Optimization**: Automatic meta tags and structured data
 
-#### Technical Implementation
+#### Technical Implementation (planned, not in codebase)
 ```rust
 pub struct BlogArticle {
     pub id: String,
@@ -195,7 +199,7 @@ pub enum ArticleStatus {
 - **Content Scheduling**: Timed publication and social media integration
 - **Import/Export**: Support for various content formats
 
-### 3.3 Personal Portfolio Site
+### 3.3 Personal Portfolio Site [PLANNED]
 
 #### Overview
 A professional portfolio platform showcasing work, skills, and achievements with social integration.
@@ -208,7 +212,7 @@ A professional portfolio platform showcasing work, skills, and achievements with
 - **Blog Integration**: Seamless connection to article platform
 - **Social Proof**: ActivityPub-based endorsements and recommendations
 
-#### Technical Implementation
+#### Technical Implementation (planned, not in codebase)
 ```rust
 pub struct Portfolio {
     pub owner: Actor,
@@ -239,9 +243,9 @@ pub struct Project {
 - **Achievement Verification**: Blockchain-based credential verification
 - **Analytics Dashboard**: Visitor insights and engagement tracking
 
-## 4. ActivityPub Implementation
+## 4. ActivityPub Implementation [PARTIAL]
 
-### 4.1 Core Object Types
+### 4.1 Core Object Types [IMPLEMENTED]
 
 #### Supported ActivityPub Objects
 - **Note**: Short-form content (microblog posts)
@@ -268,7 +272,7 @@ pub struct Project {
 }
 ```
 
-### 4.2 Federation Strategy
+### 4.2 Federation Strategy [PARTIAL]
 
 #### Multi-Domain Support
 - **Domain Isolation**: Complete separation of domain data and configuration
@@ -276,13 +280,16 @@ pub struct Project {
 - **Custom Branding**: Per-domain theming and customization
 - **Independent Moderation**: Domain-specific moderation policies
 
-#### Cross-Platform Compatibility
-- **Mastodon Integration**: Full compatibility with Mastodon servers
-- **Pleroma Support**: Compatible with Pleroma and forks
-- **PeerTube Integration**: Video content federation support
-- **WordPress ActivityPub**: Blog post federation with WordPress sites
+#### Cross-Platform Compatibility [PLANNED]
 
-## 5. Data Architecture
+> Interoperability has been tested with snac2 and Mitra only. Compatibility with other implementations is expected but not verified.
+
+- **Mastodon Integration**: Not tested
+- **Pleroma Support**: Not tested
+- **PeerTube Integration**: Not tested
+- **WordPress ActivityPub**: Not tested
+
+## 5. Data Architecture [IMPLEMENTED]
 
 ### 5.1 Database Schema
 
@@ -346,9 +353,9 @@ pub struct Project {
 
 ## 6. Security Considerations
 
-### 6.1 HTTP Signature Authentication
+### 6.1 HTTP Signature Authentication [PARTIAL]
 
-Oxifed implements a robust HTTP signature system following ActivityPub best practices and RFC 9421, with backward compatibility for existing implementations.
+Oxifed implements RFC 9421 HTTP Message Signatures for outgoing requests. Incoming request verification is a placeholder. Cavage-12 compatibility is planned but not implemented.
 
 #### Signature Profile and Standards Compliance
 
@@ -358,12 +365,12 @@ Oxifed implements a robust HTTP signature system following ActivityPub best prac
 - **Headers**: `(request-target)`, `host`, `date`, `digest` (for POST requests)
 - **Timestamp Window**: 1 hour ± 5 minutes to account for clock skew
 
-#### Double-Knocking Implementation
+#### Double-Knocking Implementation [PLANNED]
 
-To ensure maximum compatibility across the fediverse, Oxifed implements "double-knocking":
+> Not implemented. This describes the intended fallback strategy.
 
 1. **Primary Attempt**: Try cavage-12 with `hs2019` algorithm
-2. **Fallback**: Attempt RFC 9421 if primary fails  
+2. **Fallback**: Attempt RFC 9421 if primary fails
 3. **Algorithm-Specific**: Try explicit algorithms (rsa-sha256, rsa-sha512, ed25519)
 4. **Version Detection**: Use presence of `Signature-Input` header to detect newer versions
 
@@ -374,9 +381,9 @@ To ensure maximum compatibility across the fediverse, Oxifed implements "double-
 - **Access Control**: Domain-level and user-level blocking enforcement
 - **Caching Compatibility**: Proper `Vary` header usage for signature-dependent responses
 
-### 6.2 Public Key Infrastructure (PKI)
+### 6.2 Public Key Infrastructure (PKI) [PARTIAL]
 
-Oxifed implements a hierarchical PKI system enabling user key autonomy while maintaining domain authority.
+Oxifed defines PKI types and trust levels. Key generation currently returns mock PEM strings. The full trust chain verification is not implemented.
 
 #### Trust Hierarchy
 
@@ -421,7 +428,9 @@ Well-known endpoints for key discovery and verification:
 - `/.well-known/oxifed/pki-info` - Complete trust hierarchy information
 - `/.well-known/oxifed/trust-chain` - Verification chain for any key
 
-### 6.3 Authentication & Authorization
+### 6.3 Authentication & Authorization [PLANNED]
+
+> None of the following are implemented.
 
 - **Multi-Level Trust**: PKI-based trust levels affect authorization decisions
 - **Domain Verification**: Cryptographic proof of domain ownership
@@ -429,21 +438,21 @@ Well-known endpoints for key discovery and verification:
 - **Content Validation**: Strict input validation and sanitization
 - **Signature Caching**: LRU cache for signature verification results
 
-### 6.4 Content Safety
+### 6.4 Content Safety [PLANNED]
 - **Moderation Tools**: Automated and manual content moderation
 - **Spam Prevention**: Machine learning-based spam detection with signature trust factors
 - **Content Filtering**: User-configurable content filtering
 - **Report System**: Community-driven content reporting
 - **Reputation System**: Trust-level integration with content visibility
 
-### 6.5 Privacy Protection
+### 6.5 Privacy Protection [PLANNED]
 - **Data Minimization**: Collect only necessary data
 - **User Control**: Granular privacy settings and data export
 - **Encryption**: At-rest and in-transit data encryption
 - **Key Escrow**: Optional user key backup with domain authority
 - **Compliance**: GDPR and other privacy regulation compliance
 
-### 6.6 Security Monitoring and Incident Response
+### 6.6 Security Monitoring and Incident Response [PLANNED]
 
 - **Signature Analytics**: Monitor signature verification patterns for anomalies
 - **Key Rotation Tracking**: Automated detection of suspicious key changes
@@ -451,7 +460,7 @@ Well-known endpoints for key discovery and verification:
 - **Emergency Procedures**: Rapid key revocation and recovery protocols
 - **Audit Logging**: Comprehensive logging of all cryptographic operations
 
-## 7. Scalability & Performance
+## 7. Scalability & Performance [PLANNED]
 
 ### 7.1 Horizontal Scaling
 - **Stateless Services**: All daemons designed for horizontal scaling
@@ -465,7 +474,7 @@ Well-known endpoints for key discovery and verification:
 - **Connection Pooling**: Database and HTTP connection reuse
 - **Compression**: Content compression for bandwidth optimization
 
-## 8. Deployment & Operations
+## 8. Deployment & Operations [PARTIAL]
 
 ### 8.1 Container Architecture
 ```yaml
@@ -489,7 +498,7 @@ services:
       - "443:443"
 ```
 
-### 8.2 Monitoring & Observability
+### 8.2 Monitoring & Observability [PLANNED]
 - **Metrics Collection**: Prometheus-based metrics gathering
 - **Distributed Tracing**: OpenTelemetry integration
 - **Log Aggregation**: Centralized logging with structured data
@@ -503,37 +512,29 @@ services:
 
 ## 9. Development Roadmap
 
-### Phase 1: Core Infrastructure (Completed)
-- ✅ Basic ActivityPub server implementation
-- ✅ Message queue integration
-- ✅ Database abstraction layer
-- ✅ CLI administration tools
+### Phase 1: Core Infrastructure (Partial)
+- Basic ActivityPub server implementation -- done
+- Message queue integration -- done
+- Database layer -- done
+- CLI administration tools -- partial (some commands are stubs)
+- HTTP signature signing -- done
+- HTTP signature verification -- placeholder
+- PKI key generation -- mock
 
-### Phase 2: Microblogging Platform (In Progress)
-- 🔄 Web interface development
-- 🔄 Real-time timeline updates
-- 🔄 Media attachment handling
-- 📋 Mobile application development
+### Phase 2: Core Completeness (Next)
+- Real HTTP signature verification on incoming requests
+- Real PKI key generation
+- Cavage-12 compatibility
+- Complete oxiadm command implementations
+- OAuth authentication
 
-### Phase 3: Blogging Platform
-- 📋 Rich text editor implementation
-- 📋 Editorial workflow system
-- 📋 SEO optimization features
-- 📋 Analytics dashboard
+### Phase 3: Application Platforms (Future)
+- Web interfaces
+- Microblogging application
+- Blogging platform
+- Portfolio sites
 
-### Phase 4: Portfolio Platform
-- 📋 Portfolio builder interface
-- 📋 Professional networking features
-- 📋 Skill endorsement system
-- 📋 Custom domain support
-
-### Phase 5: Advanced Features
-- 📋 Plugin architecture
-- 📋 Advanced moderation tools
-- 📋 AI-powered content recommendations
-- 📋 Enterprise features
-
-## 10. Community & Ecosystem
+## 10. Community & Ecosystem [PLANNED]
 
 ### 10.1 Developer Ecosystem
 - **Plugin API**: Extensible architecture for third-party developers
@@ -555,21 +556,8 @@ services:
 
 ## 11. Technical Specifications
 
-### 11.1 System Requirements
-- **Minimum**: 2 CPU cores, 4GB RAM, 20GB storage
-- **Recommended**: 4 CPU cores, 8GB RAM, 100GB SSD
-- **Enterprise**: 8+ CPU cores, 16GB+ RAM, 500GB+ SSD
-
-### 11.2 Dependencies
-- **Runtime**: Rust 1.70+, tokio async runtime
+### 11.1 Dependencies
+- **Runtime**: Rust nightly (edition 2024), tokio async runtime
 - **Database**: MongoDB 6.0+
-- **Message Queue**: RabbitMQ 3.11+ or compatible AMQP broker
-- **Web Server**: Nginx or Apache for reverse proxy
-
-### 11.3 API Versioning
-- **Semantic Versioning**: Major.Minor.Patch version scheme
-- **Backward Compatibility**: Minimum 1-year deprecation cycle
-- **API Documentation**: OpenAPI 3.0 specification
-- **Client Libraries**: Official SDKs for major programming languages
-
-This design document provides a comprehensive foundation for the Oxifed ActivityPub platform, enabling the development of federated social applications while maintaining flexibility and standards compliance.
+- **Message Queue**: LavinMQ or RabbitMQ 3.11+
+- **Reverse Proxy**: Nginx or similar (for production deployment)

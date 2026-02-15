@@ -188,7 +188,7 @@ docker build -f docker/oxifed-operator/Dockerfile -t oxifed-operator .
 ### Common Issues
 
 **Build Failures:**
-- Check Rust version compatibility (requires 1.70+)
+- Check Rust version compatibility (requires nightly, edition 2024)
 - Verify all dependencies are available
 - Check for formatting issues with `cargo fmt`
 

@@ -55,19 +55,14 @@ This directory contains assets for promoting Oxifed on social media platforms.
 ### Sample Posts
 
 #### Launch Announcement
-🚀 Introducing Oxifed - a comprehensive ActivityPub platform built with Rust!
+Oxifed - an experimental ActivityPub federation server built with Rust.
 
-✨ Multi-domain support
-🔒 Security-first design  
-⚡ High performance
-🌐 Full federation compatibility
+Multi-domain support, AMQP-based microservices, HTTP signature signing (RFC 9421).
 
-Join the future of decentralized social media! #Oxifed #ActivityPub #RustLang
+Pre-alpha. An AI coding experiment. #Oxifed #ActivityPub #RustLang
 
 #### Feature Highlight
-🛡️ Security spotlight: Oxifed implements robust HTTP signature authentication with PKI-based trust hierarchy.
-
-Your federated communications are protected by industry-standard cryptography. #Security #ActivityPub #Federation
+Oxifed implements RFC 9421 HTTP Message Signatures for outgoing ActivityPub delivery. Incoming signature verification is still a work in progress. #ActivityPub #Federation
 
 #### Community Growth
 📈 The Oxifed community is growing! 
@@ -117,7 +112,7 @@ Example: `https://github.com/Toasterson/oxifed?utm_source=social&utm_medium=twit
 
 ### GitHub Profile
 - **Name**: Oxifed
-- **Bio**: "Comprehensive ActivityPub platform for federated social applications. Built with Rust. 🦀🌐"
+- **Bio**: "Experimental ActivityPub federation server. Built with Rust. Pre-alpha."
 - **Website**: Link to main repository
 - **Location**: "Distributed & Federated"
 - **Pronouns**: they/them (for the project)

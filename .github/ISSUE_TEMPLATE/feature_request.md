@@ -102,7 +102,7 @@ How should this feature work with other ActivityPub platforms?
 What documentation would need to be updated?
 - [ ] README.md
 - [ ] docs/DESIGN.md
-- [ ] docs/ARCHITECTURE.md
+- [ ] docs/ARCHITECTURE_DESIGN.md
 - [ ] API documentation
 - [ ] User guides
 - [ ] Development guides

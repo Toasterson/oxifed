@@ -230,18 +230,17 @@ The E2E suite tests Oxifed against:
 
 ### Interoperability Matrix
 
+> **Note:** This matrix represents test definitions, not guaranteed passing status. Check CI results for current pass/fail status.
+
 | From ↓ To → | Oxifed | snac | Mitra |
 |-------------|---------|------|-------|
-| **Oxifed** | ✅ | ✅ | ✅ |
-| **snac** | ✅ | ✅ | ✅ |
-| **Mitra** | ✅ | ✅ | ✅ |
+| **Oxifed** | E2E tests defined | E2E tests defined | E2E tests defined |
+| **snac** | E2E tests defined | E2E tests defined | E2E tests defined |
+| **Mitra** | E2E tests defined | E2E tests defined | E2E tests defined |
 
-Tested Activities:
-- Follow/Accept/Reject
-- Create Note/Status
-- Like/Favorite
-- Announce/Boost
-- WebFinger Discovery
+Test coverage includes: Follow/Accept/Reject, Create Note/Status, Like/Favorite, Announce/Boost, WebFinger Discovery.
+
+No other ActivityPub implementations (Mastodon, Pleroma, GoToSocial, etc.) have been tested.
 
 ## GitHub CI Integration
 

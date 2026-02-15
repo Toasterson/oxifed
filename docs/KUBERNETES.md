@@ -93,6 +93,8 @@ kubectl apply -f my-domain.yaml
 
 The `oxifed-operator` will pick up the new resource and initialize the domain in the system.
 
+> **Note:** The operator currently generates mock key material (see [KNOWN_ISSUES.md](KNOWN_ISSUES.md)). Keys stored in Kubernetes Secrets are not real cryptographic keys.
+
 ## Troubleshooting
 
 ### Check Pod Status

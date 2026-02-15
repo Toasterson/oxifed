@@ -12,7 +12,7 @@ We love your input! We want to make contributing to Oxifed as easy and transpare
 
 ### Prerequisites
 
-- Rust 1.70+ with `rustfmt` and `clippy`
+- Rust nightly (edition 2024) with `rustfmt` and `clippy`
 - Docker & Docker Compose
 - MongoDB 6.0+
 - RabbitMQ 3.11+
@@ -163,7 +163,7 @@ crates/
 
 ### Database Guidelines
 
-- Use MongoDB collections appropriately (see `docs/ARCHITECTURE.md`)
+- Use MongoDB collections appropriately (see `docs/ARCHITECTURE_DESIGN.md`)
 - Create proper indexes for query patterns
 - Handle errors gracefully
 - Use transactions for multi-document operations
