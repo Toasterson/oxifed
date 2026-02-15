@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use k8s_openapi::ByteString;
 use k8s_openapi::api::core::v1::Secret;
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference};
+use kube::api::{DynamicObject, Patch, PatchParams};
 use kube::runtime::Controller;
 use kube::{Api, Client};
 use kube::{CustomResource, ResourceExt, runtime::controller::Action};
@@ -47,9 +48,54 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Gateway/TLS configuration loaded from environment
+#[derive(Clone)]
+struct GatewayConfig {
+    gateway_name: String,
+    gateway_namespace: String,
+    cert_issuer_name: String,
+    cert_issuer_kind: String,
+    domainservd_service_name: String,
+    domainservd_service_port: i64,
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            gateway_name: "external".to_string(),
+            gateway_namespace: "envoy-gateway-system".to_string(),
+            cert_issuer_name: "letsencrypt".to_string(),
+            cert_issuer_kind: "ClusterIssuer".to_string(),
+            domainservd_service_name: "domainservd".to_string(),
+            domainservd_service_port: 80,
+        }
+    }
+}
+
+impl GatewayConfig {
+    fn from_env() -> Self {
+        Self {
+            gateway_name: std::env::var("GATEWAY_NAME").unwrap_or_else(|_| "external".to_string()),
+            gateway_namespace: std::env::var("GATEWAY_NAMESPACE")
+                .unwrap_or_else(|_| "envoy-gateway-system".to_string()),
+            cert_issuer_name: std::env::var("CERT_ISSUER_NAME")
+                .unwrap_or_else(|_| "letsencrypt".to_string()),
+            cert_issuer_kind: std::env::var("CERT_ISSUER_KIND")
+                .unwrap_or_else(|_| "ClusterIssuer".to_string()),
+            domainservd_service_name: std::env::var("DOMAINSERVD_SERVICE_NAME")
+                .unwrap_or_else(|_| "domainservd".to_string()),
+            domainservd_service_port: std::env::var("DOMAINSERVD_SERVICE_PORT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(80),
+        }
+    }
+}
+
 struct Context {
     client: Client,
     db_manager: Option<DatabaseManager>,
+    gateway_config: GatewayConfig,
 }
 
 async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
@@ -74,50 +120,58 @@ async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
         Some(secret) => {
             tracing::debug!("Secret {} already exists", secret_name);
             // Even if secret exists, ensure key is in MongoDB
-            if let Some(ref db_manager) = ctx.db_manager {
-                if let Some(data) = secret.data {
-                    if let (Some(pub_key), Some(_priv_key)) =
-                        (data.get("public_key.pem"), data.get("private_key.pem"))
-                    {
-                        let pub_key_str = String::from_utf8_lossy(&pub_key.0).to_string();
-                        let priv_key_str = String::from_utf8_lossy(&_priv_key.0).to_string();
+            if let Some(ref db_manager) = ctx.db_manager
+                && let Some(data) = secret.data
+                && let (Some(pub_key), Some(priv_key)) =
+                    (data.get("public_key.pem"), data.get("private_key.pem"))
+            {
+                let pub_key_str = String::from_utf8_lossy(&pub_key.0).to_string();
+                let priv_key_str = String::from_utf8_lossy(&priv_key.0).to_string();
 
-                        let key_doc = KeyDocument {
-                            id: None,
-                            key_id: secret_name.clone(),
-                            actor_id: format!("https://{}/actor", domain.spec.hostname),
-                            key_type: KeyType::Domain,
-                            algorithm: "Ed25519".to_string(),
-                            key_size: None,
-                            public_key_pem: pub_key_str,
-                            private_key_pem: Some(priv_key_str),
-                            encryption_algorithm: None,
-                            fingerprint: "MOCK_FINGERPRINT".to_string(),
-                            trust_level: TrustLevel::MasterSigned,
-                            domain_signature: None,
-                            master_signature: None,
-                            usage: vec!["signing".to_string()],
-                            status: KeyStatus::Active,
-                            created_at: Utc::now(),
-                            expires_at: None,
-                            rotation_policy: None,
-                            domain: Some(domain.spec.hostname.clone()),
-                        };
-                        db_manager
-                            .upsert_key(key_doc)
-                            .await
-                            .map_err(|e| Error::DatabaseError(e.to_string()))?;
-                    }
-                }
+                // Calculate fingerprint from the public key
+                let fingerprint = {
+                    use sha2::{Digest, Sha256};
+                    let mut hasher = Sha256::new();
+                    hasher.update(pub_key_str.as_bytes());
+                    let result = hasher.finalize();
+                    format!("sha256:{}", hex::encode(result))
+                };
+
+                let key_doc = KeyDocument {
+                    id: None,
+                    key_id: secret_name.clone(),
+                    actor_id: format!("https://{}/actor", domain.spec.hostname),
+                    key_type: KeyType::Domain,
+                    algorithm: "Ed25519".to_string(),
+                    key_size: None,
+                    public_key_pem: pub_key_str,
+                    private_key_pem: Some(priv_key_str),
+                    encryption_algorithm: None,
+                    fingerprint,
+                    trust_level: TrustLevel::MasterSigned,
+                    domain_signature: None,
+                    master_signature: None,
+                    usage: vec!["signing".to_string()],
+                    status: KeyStatus::Active,
+                    created_at: Utc::now(),
+                    expires_at: None,
+                    rotation_policy: None,
+                    domain: Some(domain.spec.hostname.clone()),
+                };
+                db_manager
+                    .upsert_key(key_doc)
+                    .await
+                    .map_err(|e| Error::DatabaseError(e.to_string()))?;
             }
         }
         None => {
             tracing::info!("Generating keys for Domain: {}", domain.name_any());
-            let _key_pair = KeyPair::generate(KeyAlgorithm::Ed25519)
+            let key_pair = KeyPair::generate(KeyAlgorithm::Ed25519)
                 .map_err(|e| Error::PkiError(e.to_string()))?;
 
-            let pub_key_pem = "MOCK_PUBLIC_KEY".to_string();
-            let priv_key_pem = "MOCK_PRIVATE_KEY".to_string();
+            let pub_key_pem = key_pair.public_key.pem_data.clone();
+            let priv_key_pem = key_pair.private_key.encrypted_pem.clone();
+            let fingerprint = key_pair.public_key.fingerprint.clone();
 
             let mut data = BTreeMap::new();
             data.insert(
@@ -155,7 +209,7 @@ async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
                     public_key_pem: pub_key_pem,
                     private_key_pem: Some(priv_key_pem),
                     encryption_algorithm: None,
-                    fingerprint: "MOCK_FINGERPRINT".to_string(),
+                    fingerprint,
                     trust_level: TrustLevel::MasterSigned,
                     domain_signature: None,
                     master_signature: None,
@@ -174,7 +228,46 @@ async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
         }
     }
 
-    // 2. Update MongoDB with the domain configuration
+    // 2. Ensure networking resources (Certificate, ReferenceGrant, HTTPRoute)
+    let domain_resource_name = domain.name_any();
+    let hostname = &domain.spec.hostname;
+    let gw = &ctx.gateway_config;
+
+    let owner_ref = OwnerReference {
+        api_version: "oxifed.io/v1alpha1".to_string(),
+        kind: "Domain".to_string(),
+        name: domain.name_any(),
+        uid: domain.metadata.uid.clone().unwrap_or_default(),
+        controller: Some(true),
+        block_owner_deletion: Some(true),
+    };
+
+    // 2a. cert-manager Certificate
+    ensure_certificate(
+        &ctx.client,
+        &ns,
+        &domain_resource_name,
+        hostname,
+        gw,
+        &owner_ref,
+    )
+    .await?;
+
+    // 2b. ReferenceGrant (allows Gateway namespace to reference our cert secret)
+    ensure_reference_grant(&ctx.client, &ns, &domain_resource_name, gw, &owner_ref).await?;
+
+    // 2c. HTTPRoute
+    ensure_httproute(
+        &ctx.client,
+        &ns,
+        &domain_resource_name,
+        hostname,
+        gw,
+        &owner_ref,
+    )
+    .await?;
+
+    // 3. Update MongoDB with the domain configuration
     if let Some(ref db_manager) = ctx.db_manager {
         tracing::info!("Updating MongoDB for Domain: {}", domain.name_any());
 
@@ -235,6 +328,178 @@ async fn reconcile(domain: Arc<Domain>, ctx: Arc<Context>) -> Result<Action> {
     }
 }
 
+/// Ensure a cert-manager Certificate exists for the domain
+async fn ensure_certificate(
+    client: &Client,
+    ns: &str,
+    domain_resource_name: &str,
+    hostname: &str,
+    gw: &GatewayConfig,
+    owner_ref: &OwnerReference,
+) -> Result<()> {
+    let cert_name = format!("{}-tls", domain_resource_name);
+    let cert_json = serde_json::json!({
+        "apiVersion": "cert-manager.io/v1",
+        "kind": "Certificate",
+        "metadata": {
+            "name": cert_name,
+            "namespace": ns,
+            "ownerReferences": [owner_ref],
+        },
+        "spec": {
+            "secretName": cert_name,
+            "commonName": hostname,
+            "dnsNames": [hostname],
+            "issuerRef": {
+                "name": gw.cert_issuer_name,
+                "kind": gw.cert_issuer_kind,
+            }
+        }
+    });
+
+    let api_resource = kube::api::ApiResource {
+        group: "cert-manager.io".to_string(),
+        version: "v1".to_string(),
+        api_version: "cert-manager.io/v1".to_string(),
+        kind: "Certificate".to_string(),
+        plural: "certificates".to_string(),
+    };
+    let api: Api<DynamicObject> = Api::namespaced_with(client.clone(), ns, &api_resource);
+
+    let obj: DynamicObject = serde_json::from_value(cert_json)
+        .map_err(|e| Error::DatabaseError(format!("Failed to build Certificate JSON: {}", e)))?;
+
+    api.patch(
+        &cert_name,
+        &PatchParams::apply("oxifed-operator").force(),
+        &Patch::Apply(&obj),
+    )
+    .await
+    .map_err(Error::KubeError)?;
+
+    tracing::info!("Ensured Certificate: {}", cert_name);
+    Ok(())
+}
+
+/// Ensure a ReferenceGrant exists allowing the Gateway namespace to reference our cert secret
+async fn ensure_reference_grant(
+    client: &Client,
+    ns: &str,
+    domain_resource_name: &str,
+    gw: &GatewayConfig,
+    owner_ref: &OwnerReference,
+) -> Result<()> {
+    let grant_name = format!("{}-tls-grant", domain_resource_name);
+    let secret_name = format!("{}-tls", domain_resource_name);
+    let grant_json = serde_json::json!({
+        "apiVersion": "gateway.networking.k8s.io/v1beta1",
+        "kind": "ReferenceGrant",
+        "metadata": {
+            "name": grant_name,
+            "namespace": ns,
+            "ownerReferences": [owner_ref],
+        },
+        "spec": {
+            "from": [{
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "namespace": gw.gateway_namespace,
+            }],
+            "to": [{
+                "group": "",
+                "kind": "Secret",
+                "name": secret_name,
+            }]
+        }
+    });
+
+    let api_resource = kube::api::ApiResource {
+        group: "gateway.networking.k8s.io".to_string(),
+        version: "v1beta1".to_string(),
+        api_version: "gateway.networking.k8s.io/v1beta1".to_string(),
+        kind: "ReferenceGrant".to_string(),
+        plural: "referencegrants".to_string(),
+    };
+    let api: Api<DynamicObject> = Api::namespaced_with(client.clone(), ns, &api_resource);
+
+    let obj: DynamicObject = serde_json::from_value(grant_json)
+        .map_err(|e| Error::DatabaseError(format!("Failed to build ReferenceGrant JSON: {}", e)))?;
+
+    api.patch(
+        &grant_name,
+        &PatchParams::apply("oxifed-operator").force(),
+        &Patch::Apply(&obj),
+    )
+    .await
+    .map_err(Error::KubeError)?;
+
+    tracing::info!("Ensured ReferenceGrant: {}", grant_name);
+    Ok(())
+}
+
+/// Ensure an HTTPRoute exists routing traffic for this domain to domainservd
+async fn ensure_httproute(
+    client: &Client,
+    ns: &str,
+    domain_resource_name: &str,
+    hostname: &str,
+    gw: &GatewayConfig,
+    owner_ref: &OwnerReference,
+) -> Result<()> {
+    let route_name = domain_resource_name.to_string();
+    let route_json = serde_json::json!({
+        "apiVersion": "gateway.networking.k8s.io/v1",
+        "kind": "HTTPRoute",
+        "metadata": {
+            "name": route_name,
+            "namespace": ns,
+            "ownerReferences": [owner_ref],
+        },
+        "spec": {
+            "parentRefs": [{
+                "name": gw.gateway_name,
+                "namespace": gw.gateway_namespace,
+            }],
+            "hostnames": [hostname],
+            "rules": [{
+                "matches": [{
+                    "path": {
+                        "type": "PathPrefix",
+                        "value": "/"
+                    }
+                }],
+                "backendRefs": [{
+                    "name": gw.domainservd_service_name,
+                    "port": gw.domainservd_service_port,
+                }]
+            }]
+        }
+    });
+
+    let api_resource = kube::api::ApiResource {
+        group: "gateway.networking.k8s.io".to_string(),
+        version: "v1".to_string(),
+        api_version: "gateway.networking.k8s.io/v1".to_string(),
+        kind: "HTTPRoute".to_string(),
+        plural: "httproutes".to_string(),
+    };
+    let api: Api<DynamicObject> = Api::namespaced_with(client.clone(), ns, &api_resource);
+
+    let obj: DynamicObject = serde_json::from_value(route_json)
+        .map_err(|e| Error::DatabaseError(format!("Failed to build HTTPRoute JSON: {}", e)))?;
+
+    api.patch(
+        &route_name,
+        &PatchParams::apply("oxifed-operator").force(),
+        &Patch::Apply(&obj),
+    )
+    .await
+    .map_err(Error::KubeError)?;
+
+    tracing::info!("Ensured HTTPRoute: {}", route_name);
+    Ok(())
+}
+
 fn error_policy(_domain: Arc<Domain>, error: &Error, _ctx: Arc<Context>) -> Action {
     tracing::error!("Reconciliation error: {:?}", error);
     Action::requeue(Duration::from_secs(60))
@@ -268,9 +533,17 @@ async fn main() -> Result<()> {
         None
     };
 
+    let gateway_config = GatewayConfig::from_env();
+    tracing::info!(
+        "Gateway config: {} in namespace {}",
+        gateway_config.gateway_name,
+        gateway_config.gateway_namespace
+    );
+
     let context = Arc::new(Context {
         client: client.clone(),
         db_manager,
+        gateway_config,
     });
 
     tracing::info!("Starting Domain Operator");

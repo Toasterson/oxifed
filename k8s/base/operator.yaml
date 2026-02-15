@@ -26,7 +26,7 @@ spec:
                 - amd64
       containers:
       - name: operator
-        image: ghcr.io/oxifed/oxifed/oxifed-operator:latest
+        image: ghcr.io/toasterson/oxifed/oxifed-operator:latest
         env:
         - name: RUST_LOG
           value: info
@@ -49,6 +49,12 @@ rules:
 - apiGroups: [""]
   resources: ["secrets", "events"]
   verbs: ["get", "list", "watch", "create", "patch", "update"]
+- apiGroups: ["gateway.networking.k8s.io"]
+  resources: ["httproutes", "referencegrants"]
+  verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+- apiGroups: ["cert-manager.io"]
+  resources: ["certificates"]
+  verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

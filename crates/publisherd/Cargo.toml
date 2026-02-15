@@ -23,3 +23,5 @@ tracing-subscriber = "0.3"
 thiserror.workspace = true
 url = "2.5.4"
 futures = "0.3"
+mongodb = { workspace = true }
+base64 = "0.22"

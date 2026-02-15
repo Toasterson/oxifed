@@ -9,6 +9,7 @@
 use crate::httpsignature::SignatureAlgorithm;
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
+use ring::signature::{Ed25519KeyPair, KeyPair as RingKeyPair};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -193,45 +194,95 @@ impl KeyPair {
     }
 
     /// Generate an RSA key pair
-    fn generate_rsa(key_size: u32) -> Result<Self, PkiError> {
-        // In a real implementation, this would use actual RSA key generation
-        // For now, create mock PEM strings that indicate the algorithm and key size
-        let public_pem = format!(
-            "-----BEGIN PUBLIC KEY-----\nMOCK_RSA_PUBLIC_KEY_{}\n-----END PUBLIC KEY-----",
-            key_size
-        );
-        let private_pem = format!(
-            "-----BEGIN PRIVATE KEY-----\nMOCK_RSA_PRIVATE_KEY_{}\n-----END PRIVATE KEY-----",
-            key_size
-        );
-
-        Self::from_pem(KeyAlgorithm::Rsa { key_size }, public_pem, private_pem)
+    fn generate_rsa(_key_size: u32) -> Result<Self, PkiError> {
+        Err(PkiError::UnsupportedAlgorithm(
+            "RSA key generation is not supported. Use Ed25519 instead.".to_string(),
+        ))
     }
 
-    /// Generate an Ed25519 key pair
+    /// Generate an Ed25519 key pair using the ring crate
     fn generate_ed25519() -> Result<Self, PkiError> {
-        // In a real implementation, this would use actual Ed25519 key generation
-        // For now, create mock PEM strings that indicate the algorithm
-        let public_pem =
-            "-----BEGIN PUBLIC KEY-----\nMOCK_ED25519_PUBLIC_KEY\n-----END PUBLIC KEY-----"
-                .to_string();
-        let private_pem =
-            "-----BEGIN PRIVATE KEY-----\nMOCK_ED25519_PRIVATE_KEY\n-----END PRIVATE KEY-----"
-                .to_string();
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8_doc = Ed25519KeyPair::generate_pkcs8(&rng).map_err(|e| {
+            PkiError::KeyGenerationError(format!("Ed25519 generation failed: {}", e))
+        })?;
+
+        let key_pair = Ed25519KeyPair::from_pkcs8(pkcs8_doc.as_ref()).map_err(|e| {
+            PkiError::KeyGenerationError(format!("Failed to parse generated key: {}", e))
+        })?;
+
+        // Encode private key as PEM (PKCS#8 DER -> PEM)
+        let private_pem = der_to_pem(pkcs8_doc.as_ref(), "PRIVATE KEY");
+
+        // Ed25519 public key: the raw 32-byte key needs to be wrapped in
+        // SubjectPublicKeyInfo DER structure for standard PEM encoding
+        let public_key_bytes = key_pair.public_key().as_ref();
+        let public_key_der = encode_ed25519_spki(public_key_bytes);
+        let public_pem = der_to_pem(&public_key_der, "PUBLIC KEY");
 
         Self::from_pem(KeyAlgorithm::Ed25519, public_pem, private_pem)
     }
 
-    /// Sign data with the private key (simplified version)
+    /// Sign data with the private key
     pub fn sign(&self, data: &[u8]) -> Result<String, PkiError> {
-        // For now, return a mock signature
-        // In a real implementation, this would use the actual cryptographic libraries
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        hasher.update(self.private_key.encrypted_pem.as_bytes());
-        let result = hasher.finalize();
-        Ok(general_purpose::STANDARD.encode(result))
+        match &self.private_key.algorithm {
+            KeyAlgorithm::Ed25519 => {
+                let private_der = pem_to_der(&self.private_key.encrypted_pem)
+                    .map_err(|e| PkiError::SignatureCreationError(format!("Invalid PEM: {}", e)))?;
+                let key_pair = Ed25519KeyPair::from_pkcs8(&private_der).map_err(|e| {
+                    PkiError::SignatureCreationError(format!("Invalid Ed25519 key: {}", e))
+                })?;
+                let sig = key_pair.sign(data);
+                Ok(general_purpose::STANDARD.encode(sig.as_ref()))
+            }
+            KeyAlgorithm::Rsa { .. } => Err(PkiError::UnsupportedAlgorithm(
+                "RSA signing not supported in PKI module. Use httpsignature module.".to_string(),
+            )),
+        }
     }
+}
+
+/// Encode DER bytes as PEM with the given label (e.g. "PRIVATE KEY", "PUBLIC KEY")
+fn der_to_pem(der: &[u8], label: &str) -> String {
+    let b64 = general_purpose::STANDARD.encode(der);
+    let mut pem = format!("-----BEGIN {}-----\n", label);
+    for chunk in b64.as_bytes().chunks(64) {
+        pem.push_str(std::str::from_utf8(chunk).unwrap());
+        pem.push('\n');
+    }
+    pem.push_str(&format!("-----END {}-----", label));
+    pem
+}
+
+/// Decode PEM to DER bytes
+fn pem_to_der(pem: &str) -> Result<Vec<u8>, PkiError> {
+    let lines: Vec<&str> = pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
+    general_purpose::STANDARD
+        .decode(lines.join(""))
+        .map_err(|e| PkiError::KeyParseError(format!("Base64 decode failed: {}", e)))
+}
+
+/// Encode raw Ed25519 public key bytes into SubjectPublicKeyInfo DER
+fn encode_ed25519_spki(public_key: &[u8]) -> Vec<u8> {
+    // SubjectPublicKeyInfo for Ed25519:
+    // SEQUENCE {
+    //   SEQUENCE { OID 1.3.101.112 }
+    //   BIT STRING (public key)
+    // }
+    let oid: &[u8] = &[0x06, 0x03, 0x2b, 0x65, 0x70]; // OID 1.3.101.112
+    let algo_seq_len = oid.len();
+    let algo_seq: Vec<u8> = [&[0x30, algo_seq_len as u8], oid].concat();
+    let bit_string: Vec<u8> = [&[0x03, (public_key.len() + 1) as u8, 0x00], public_key].concat();
+    let total_len = algo_seq.len() + bit_string.len();
+    [
+        &[0x30, total_len as u8],
+        algo_seq.as_slice(),
+        bit_string.as_slice(),
+    ]
+    .concat()
 }
 
 /// Domain signature (used to sign user keys)
@@ -591,6 +642,45 @@ mod tests {
         assert!(TrustLevel::InstanceActor > TrustLevel::MasterSigned);
         assert!(TrustLevel::MasterSigned > TrustLevel::DomainVerified);
         assert!(TrustLevel::DomainVerified > TrustLevel::Unverified);
+    }
+
+    #[test]
+    fn test_ed25519_generate_and_sign_verify() {
+        let key_pair = KeyPair::generate(KeyAlgorithm::Ed25519).unwrap();
+
+        // Verify PEM headers
+        assert!(
+            key_pair
+                .public_key
+                .pem_data
+                .starts_with("-----BEGIN PUBLIC KEY-----")
+        );
+        assert!(
+            key_pair
+                .private_key
+                .encrypted_pem
+                .starts_with("-----BEGIN PRIVATE KEY-----")
+        );
+        assert!(key_pair.public_key.fingerprint.starts_with("sha256:"));
+
+        // Sign and verify round-trip
+        let data = b"hello world";
+        let signature_b64 = key_pair.sign(data).unwrap();
+
+        // Decode signature and verify using ring
+        let sig_bytes = general_purpose::STANDARD.decode(&signature_b64).unwrap();
+        let pub_der = pem_to_der(&key_pair.public_key.pem_data).unwrap();
+        // Extract raw 32-byte public key from SPKI DER (offset 12)
+        let raw_pub = &pub_der[12..44];
+        let verify_key =
+            ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, raw_pub);
+        verify_key.verify(data, &sig_bytes).unwrap();
+    }
+
+    #[test]
+    fn test_rsa_generate_unsupported() {
+        let result = KeyPair::generate(KeyAlgorithm::Rsa { key_size: 2048 });
+        assert!(result.is_err());
     }
 
     #[test]

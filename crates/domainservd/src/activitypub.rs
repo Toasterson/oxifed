@@ -936,10 +936,13 @@ async fn get_nodeinfo(
         .into_response())
 }
 
-/// Verify HTTP signature
-async fn verify_http_signature(_headers: &HeaderMap, _state: &AppState) -> Result<(), String> {
-    // TODO: Implement proper HTTP signature verification using PKI
-    debug!("HTTP signature verification - placeholder implementation");
+/// Verify HTTP signature (warn-only mode: logs signature presence but accepts all requests)
+async fn verify_http_signature(headers: &HeaderMap, _state: &AppState) -> Result<(), String> {
+    if headers.get("signature").is_some() || headers.get("signature-input").is_some() {
+        warn!("HTTP signature present but verification not yet wired up - accepting request");
+    } else {
+        warn!("No HTTP signature on incoming S2S request - accepting without verification");
+    }
     Ok(())
 }
 
@@ -1552,21 +1555,67 @@ async fn store_article_object(object: &Value, state: &AppState) -> Result<(), St
 #[allow(dead_code)]
 pub async fn publish_activity_message_struct(
     activity: &Activity,
-    _state: &AppState,
+    state: &AppState,
 ) -> Result<(), String> {
-    // TODO: Implement message queue publishing
-    debug!(
-        "Publishing activity to message queue: {:?}",
+    let activity_json =
+        serde_json::to_vec(activity).map_err(|e| format!("Failed to serialize activity: {}", e))?;
+
+    let conn = state
+        .mq_pool
+        .get()
+        .await
+        .map_err(|e| format!("Failed to get AMQP connection: {}", e))?;
+    let channel = conn
+        .create_channel()
+        .await
+        .map_err(|e| format!("Failed to create AMQP channel: {}", e))?;
+
+    channel
+        .basic_publish(
+            oxifed::messaging::EXCHANGE_ACTIVITYPUB_PUBLISH,
+            "",
+            lapin::options::BasicPublishOptions::default(),
+            &activity_json,
+            lapin::BasicProperties::default(),
+        )
+        .await
+        .map_err(|e| format!("Failed to publish activity: {}", e))?;
+
+    info!(
+        "Published activity to AMQP exchange: {:?}",
         activity.activity_type
     );
     Ok(())
 }
 
 /// Publish activity to message queue for delivery (legacy JSON version)
-async fn publish_activity_message(activity: &Value, _state: &AppState) -> Result<(), String> {
-    // TODO: Implement message queue publishing
-    debug!(
-        "Publishing activity to message queue: {}",
+async fn publish_activity_message(activity: &Value, state: &AppState) -> Result<(), String> {
+    let activity_json =
+        serde_json::to_vec(activity).map_err(|e| format!("Failed to serialize activity: {}", e))?;
+
+    let conn = state
+        .mq_pool
+        .get()
+        .await
+        .map_err(|e| format!("Failed to get AMQP connection: {}", e))?;
+    let channel = conn
+        .create_channel()
+        .await
+        .map_err(|e| format!("Failed to create AMQP channel: {}", e))?;
+
+    channel
+        .basic_publish(
+            oxifed::messaging::EXCHANGE_ACTIVITYPUB_PUBLISH,
+            "",
+            lapin::options::BasicPublishOptions::default(),
+            &activity_json,
+            lapin::BasicProperties::default(),
+        )
+        .await
+        .map_err(|e| format!("Failed to publish activity: {}", e))?;
+
+    info!(
+        "Published activity to AMQP exchange: {}",
         activity.get("type").unwrap_or(&json!("Unknown"))
     );
     Ok(())

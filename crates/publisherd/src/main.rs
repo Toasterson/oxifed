@@ -3,13 +3,20 @@
 //! This daemon is responsible for processing activities from the message queue
 //! and delivering them to followers according to the ActivityPub specification.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use futures::StreamExt;
 use lapin::{
     Channel, Connection, ConnectionProperties, ExchangeKind, options::*, types::FieldTable,
 };
+use oxifed::Activity;
+use oxifed::client::{ActivityPubClient, ClientConfig};
+use oxifed::database::DatabaseManager;
+use oxifed::httpsignature::{
+    ComponentIdentifier, SignatureAlgorithm, SignatureConfig, SignatureParameters,
+};
 use oxifed::messaging::EXCHANGE_ACTIVITYPUB_PUBLISH;
-use oxifed::{Activity, client::ActivityPubClient};
 
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::signal;
 use tracing::{error, info, warn};
@@ -30,6 +37,9 @@ pub enum PublisherError {
     #[error("HTTP client error: {0}")]
     ClientError(#[from] oxifed::client::ClientError),
 
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+
     #[error("Environment variable error: {0}")]
     EnvError(#[from] std::env::VarError),
 
@@ -41,6 +51,8 @@ pub enum PublisherError {
 #[derive(Debug, Clone)]
 pub struct PublisherConfig {
     pub amqp_url: String,
+    pub mongodb_uri: Option<String>,
+    pub mongodb_dbname: String,
     pub worker_count: usize,
     pub retry_attempts: usize,
     pub retry_delay_ms: u64,
@@ -50,6 +62,8 @@ impl Default for PublisherConfig {
     fn default() -> Self {
         Self {
             amqp_url: "amqp://guest:guest@localhost:5672".to_string(),
+            mongodb_uri: None,
+            mongodb_dbname: "domainservd".to_string(),
             worker_count: 4,
             retry_attempts: 3,
             retry_delay_ms: 1000,
@@ -61,7 +75,7 @@ impl Default for PublisherConfig {
 pub struct PublisherDaemon {
     config: PublisherConfig,
     connection: Connection,
-    client: oxifed::client::ActivityPubClient,
+    db_manager: Option<Arc<DatabaseManager>>,
 }
 
 impl PublisherDaemon {
@@ -72,13 +86,26 @@ impl PublisherDaemon {
         let connection =
             Connection::connect(&config.amqp_url, ConnectionProperties::default()).await?;
 
-        let client =
-            oxifed::client::ActivityPubClient::new().map_err(PublisherError::ClientError)?;
+        // Initialize MongoDB for key lookups
+        let db_manager = if let Some(ref uri) = config.mongodb_uri {
+            info!("Connecting to MongoDB for key lookups");
+            let client_options = mongodb::options::ClientOptions::parse(uri)
+                .await
+                .map_err(|e| PublisherError::DatabaseError(e.to_string()))?;
+            let mongo_client = mongodb::Client::with_options(client_options)
+                .map_err(|e| PublisherError::DatabaseError(e.to_string()))?;
+            let database = mongo_client.database(&config.mongodb_dbname);
+            let manager = DatabaseManager::new(database);
+            Some(Arc::new(manager))
+        } else {
+            warn!("MONGODB_URI not set - outgoing activities will be unsigned");
+            None
+        };
 
         Ok(Self {
             config,
             connection,
-            client,
+            db_manager,
         })
     }
 
@@ -94,11 +121,11 @@ impl PublisherDaemon {
 
         for worker_id in 0..self.config.worker_count {
             let channel = self.connection.create_channel().await?;
-            let client = self.client.clone();
             let config = self.config.clone();
+            let db_manager = self.db_manager.clone();
 
             let worker = tokio::spawn(async move {
-                if let Err(e) = Self::run_worker(worker_id, channel, client, config).await {
+                if let Err(e) = Self::run_worker(worker_id, channel, db_manager, config).await {
                     error!("Worker {} failed: {}", worker_id, e);
                 }
             });
@@ -125,7 +152,7 @@ impl PublisherDaemon {
     async fn run_worker(
         worker_id: usize,
         channel: Channel,
-        client: oxifed::client::ActivityPubClient,
+        db_manager: Option<Arc<DatabaseManager>>,
         config: PublisherConfig,
     ) -> Result<(), PublisherError> {
         info!("Starting worker {}", worker_id);
@@ -187,7 +214,7 @@ impl PublisherDaemon {
         // Process messages using async stream
         consumer
             .for_each(move |delivery_result| {
-                let client = client.clone();
+                let db_manager = db_manager.clone();
                 let config = config.clone();
 
                 async move {
@@ -199,7 +226,7 @@ impl PublisherDaemon {
                                 worker_id, delivery_tag
                             );
 
-                            match Self::process_activity(&delivery.data, client, config).await {
+                            match Self::process_activity(&delivery.data, db_manager, config).await {
                                 Ok(_) => {
                                     info!(
                                         "Worker {} successfully processed message {}",
@@ -250,10 +277,74 @@ impl PublisherDaemon {
         Ok(())
     }
 
+    /// Build a signing-capable ActivityPubClient for a given actor
+    async fn build_signing_client(
+        actor_id: &str,
+        db_manager: &Option<Arc<DatabaseManager>>,
+    ) -> Result<ActivityPubClient, PublisherError> {
+        if let Some(db) = db_manager {
+            // Look up the actor's key from MongoDB
+            match db.find_keys_by_actor(actor_id).await {
+                Ok(keys) if !keys.is_empty() => {
+                    let key_doc = &keys[0];
+                    if let Some(ref private_pem) = key_doc.private_key_pem {
+                        // Decode PEM to DER for ring
+                        let private_der = {
+                            let lines: Vec<&str> = private_pem
+                                .lines()
+                                .filter(|line| !line.starts_with("-----"))
+                                .collect();
+                            BASE64.decode(lines.join("")).map_err(|e| {
+                                PublisherError::DatabaseError(format!("Invalid PEM base64: {}", e))
+                            })?
+                        };
+
+                        let key_id = format!("{}#main-key", actor_id);
+                        let sig_config = SignatureConfig {
+                            algorithm: SignatureAlgorithm::Ed25519,
+                            parameters: SignatureParameters::new(),
+                            key_id,
+                            components: vec![
+                                ComponentIdentifier::Method,
+                                ComponentIdentifier::TargetUri,
+                                ComponentIdentifier::Header("host".to_string()),
+                                ComponentIdentifier::Header("date".to_string()),
+                                ComponentIdentifier::Header("content-type".to_string()),
+                                ComponentIdentifier::Digest,
+                            ],
+                            private_key: private_der,
+                        };
+
+                        let client_config = ClientConfig {
+                            user_agent: "Oxifed/0.3.8".to_string(),
+                            http_signature_config: Some(sig_config),
+                            oauth_token: None,
+                        };
+
+                        info!("Created signing client for actor: {}", actor_id);
+                        return ActivityPubClient::with_config(client_config)
+                            .map_err(PublisherError::ClientError);
+                    }
+                    warn!("No private key found for actor: {}", actor_id);
+                }
+                Ok(_) => {
+                    warn!("No key document found for actor: {}", actor_id);
+                }
+                Err(e) => {
+                    warn!("Failed to look up key for actor {}: {}", actor_id, e);
+                }
+            }
+        }
+
+        // Fallback to unsigned client
+        warn!("Using unsigned client for delivery");
+        ActivityPubClient::new().map_err(PublisherError::ClientError)
+    }
+
     /// Process a single activity
     async fn process_activity(
         data: &[u8],
-        client: oxifed::client::ActivityPubClient,
+        db_manager: Option<Arc<DatabaseManager>>,
         config: PublisherConfig,
     ) -> Result<(), PublisherError> {
         // Parse the activity from JSON
@@ -263,6 +354,27 @@ impl PublisherDaemon {
             "Processing activity: {:?} with ID: {:?}",
             activity.activity_type, activity.id
         );
+
+        // Extract actor ID for signing
+        let actor_id = activity.actor.as_ref().map(|a| match a {
+            oxifed::ObjectOrLink::Url(url) => url.to_string(),
+            oxifed::ObjectOrLink::Object(obj) => {
+                obj.id.as_ref().map(|u| u.to_string()).unwrap_or_default()
+            }
+            oxifed::ObjectOrLink::Link(link) => link
+                .href
+                .as_ref()
+                .map(|u| u.to_string())
+                .unwrap_or_default(),
+        });
+
+        // Build a signing client for this actor
+        let client = if let Some(ref aid) = actor_id {
+            Self::build_signing_client(aid, &db_manager).await?
+        } else {
+            warn!("Activity has no actor - using unsigned client");
+            ActivityPubClient::new().map_err(PublisherError::ClientError)?
+        };
 
         // Extract recipients from the activity
         let recipients = Self::extract_recipients(&activity)?;
@@ -450,6 +562,9 @@ fn load_config() -> PublisherConfig {
         amqp_url: std::env::var("AMQP_URI")
             .or_else(|_| std::env::var("AMQP_URL"))
             .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672".to_string()),
+        mongodb_uri: std::env::var("MONGODB_URI").ok(),
+        mongodb_dbname: std::env::var("MONGODB_DBNAME")
+            .unwrap_or_else(|_| "domainservd".to_string()),
         worker_count: std::env::var("PUBLISHER_WORKERS")
             .ok()
             .and_then(|s| s.parse().ok())

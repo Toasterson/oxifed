@@ -1370,7 +1370,7 @@ async fn handle_user_command_messaging(
     client: &LavinMQClient,
     command: &UserCommands,
 ) -> Result<()> {
-    use oxifed::messaging::{UserCreateMessage, UserRpcRequest, UserRpcResponse};
+    use oxifed::messaging::UserCreateMessage;
 
     match command {
         UserCommands::Create {

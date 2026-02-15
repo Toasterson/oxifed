@@ -23,3 +23,5 @@ miette = { workspace = true }
 thiserror = { workspace = true }
 oxifed = { path = "../../" }
 mongodb = { workspace = true }
+sha2 = "0.10"
+hex = { workspace = true }

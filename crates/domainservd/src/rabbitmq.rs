@@ -19,7 +19,6 @@ use oxifed::messaging::{
     FollowActivityMessage, KeyGenerateMessage, LikeActivityMessage, Message, MessageEnum,
     NoteCreateMessage, NoteDeleteMessage, NoteUpdateMessage, ProfileCreateMessage,
     ProfileDeleteMessage, ProfileUpdateMessage, RejectActivityMessage, UserCreateMessage,
-    UserRpcRequest, UserRpcResponse,
 };
 use oxifed::messaging::{
     EXCHANGE_ACTIVITYPUB_PUBLISH, EXCHANGE_INCOMING_PROCESS, EXCHANGE_INTERNAL_PUBLISH,
@@ -691,8 +690,7 @@ async fn process_rpc_message(
     if let Some(reply_to) = &properties.reply_to() {
         let correlation_id = properties
             .correlation_id()
-            .as_ref()
-            .map(|id| id.clone())
+            .clone()
             .unwrap_or_else(|| "unknown".to_string().into());
 
         let response_data = match serde_json::to_vec(&response.to_message()) {
@@ -815,29 +813,77 @@ async fn handle_get_domain_rpc(
     }
 }
 
-async fn handle_like(_db: &Arc<MongoDB>, _msg: &LikeActivityMessage) -> Result<(), RabbitMQError> {
-    todo!()
+async fn handle_like(_db: &Arc<MongoDB>, msg: &LikeActivityMessage) -> Result<(), RabbitMQError> {
+    warn!(
+        "Like activity processing not yet fully implemented: {} liked {}",
+        msg.actor, msg.object
+    );
+    Ok(())
 }
 
 async fn handle_announce(
     _db: &Arc<MongoDB>,
-    _msg: &AnnounceActivityMessage,
+    msg: &AnnounceActivityMessage,
 ) -> Result<(), RabbitMQError> {
-    todo!()
+    warn!(
+        "Announce activity processing not yet fully implemented: {} announced {}",
+        msg.actor, msg.object
+    );
+    Ok(())
 }
 
 async fn handle_accept(
-    _db: &Arc<MongoDB>,
-    _msg: &AcceptActivityMessage,
+    db: &Arc<MongoDB>,
+    msg: &AcceptActivityMessage,
 ) -> Result<(), RabbitMQError> {
-    todo!()
+    info!(
+        "Processing Accept activity: {} accepted {}",
+        msg.actor, msg.object
+    );
+    // Update follow status from Pending to Accepted
+    let db_manager = oxifed::database::DatabaseManager::new(db.database().clone());
+    match db_manager
+        .update_follow_status(
+            &msg.object,
+            &msg.actor,
+            oxifed::database::FollowStatus::Accepted,
+        )
+        .await
+    {
+        Ok(_) => info!(
+            "Updated follow status to Accepted for {} -> {}",
+            msg.object, msg.actor
+        ),
+        Err(e) => warn!("Failed to update follow status for Accept: {}", e),
+    }
+    Ok(())
 }
 
 async fn handle_reject(
-    _db: &Arc<MongoDB>,
-    _msg: &RejectActivityMessage,
+    db: &Arc<MongoDB>,
+    msg: &RejectActivityMessage,
 ) -> Result<(), RabbitMQError> {
-    todo!()
+    info!(
+        "Processing Reject activity: {} rejected {}",
+        msg.actor, msg.object
+    );
+    // Update follow status to Rejected
+    let db_manager = oxifed::database::DatabaseManager::new(db.database().clone());
+    match db_manager
+        .update_follow_status(
+            &msg.object,
+            &msg.actor,
+            oxifed::database::FollowStatus::Rejected,
+        )
+        .await
+    {
+        Ok(_) => info!(
+            "Updated follow status to Rejected for {} -> {}",
+            msg.object, msg.actor
+        ),
+        Err(e) => warn!("Failed to update follow status for Reject: {}", e),
+    }
+    Ok(())
 }
 
 async fn handle_follow(
