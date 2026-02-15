@@ -109,8 +109,8 @@ cargo run --bin oxiadm -- migrate --from {PREVIOUS_VERSION}
 - CVE fixes (if applicable)
 
 ### 📚 Documentation Updates
-- Updated [DESIGN.md](DESIGN.md) with new architectural decisions
-- Enhanced [ARCHITECTURE.md](ARCHITECTURE.md) with implementation details
+- Updated [DESIGN.md](docs/DESIGN.md) with new architectural decisions
+- Enhanced [ARCHITECTURE.md](docs/ARCHITECTURE.md) with implementation details
 - New API documentation for endpoints
 - Updated deployment guides
 

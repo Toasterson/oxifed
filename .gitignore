@@ -1,4 +1,5 @@
 /target
+.idea/
 
 # Agent files - managed at workspace root, not in repository
 SOUL.md

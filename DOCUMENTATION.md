@@ -6,14 +6,14 @@ Welcome to the comprehensive documentation for the Oxifed ActivityPub platform. 
 
 ### Platform Overview
 - **[README.md](README.md)** - Quick start guide and platform overview
-- **[DESIGN.md](DESIGN.md)** - Complete platform architecture and feature specifications
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Detailed technical implementation specifications
-- **[KUBERNETES.md](KUBERNETES.md)** - Deployment guide for Kubernetes and FluxCD
+- **[DESIGN.md](docs/DESIGN.md)** - Complete platform architecture and feature specifications
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Detailed technical implementation specifications
+- **[KUBERNETES.md](docs/KUBERNETES.md)** - Deployment guide for Kubernetes and FluxCD
 
 ### Security and Cryptography
-- **[HTTP_SIGNATURES.md](HTTP_SIGNATURES.md)** - Comprehensive HTTP signature implementation guide
-- **Security Section in DESIGN.md** - PKI system, trust hierarchy, and key management
-- **Security Architecture in ARCHITECTURE.md** - Implementation details for cryptographic systems
+- **[HTTP_SIGNATURES.md](docs/HTTP_SIGNATURES.md)** - Comprehensive HTTP signature implementation guide
+- **Security Section in [DESIGN.md](docs/DESIGN.md)** - PKI system, trust hierarchy, and key management
+- **Security Architecture in [ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Implementation details for cryptographic systems
 
 ## 🔧 Component Documentation
 

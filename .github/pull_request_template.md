@@ -45,8 +45,8 @@ If this affects ActivityPub federation:
 ### Documentation
 - [ ] I have updated relevant documentation
 - [ ] I have added rustdoc comments for new public APIs
-- [ ] I have updated DESIGN.md (if architecture changed)
-- [ ] I have updated ARCHITECTURE.md (if implementation details changed)
+- [ ] I have updated docs/DESIGN.md (if architecture changed)
+- [ ] I have updated docs/ARCHITECTURE.md (if implementation details changed)
 - [ ] I have added/updated CLI help text (if oxiadm changed)
 
 ### Database Changes

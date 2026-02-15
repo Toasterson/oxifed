@@ -101,8 +101,8 @@ How should this feature work with other ActivityPub platforms?
 ## Documentation Impact
 What documentation would need to be updated?
 - [ ] README.md
-- [ ] DESIGN.md
-- [ ] ARCHITECTURE.md
+- [ ] docs/DESIGN.md
+- [ ] docs/ARCHITECTURE.md
 - [ ] API documentation
 - [ ] User guides
 - [ ] Development guides

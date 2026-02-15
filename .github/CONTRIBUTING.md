@@ -163,7 +163,7 @@ crates/
 
 ### Database Guidelines
 
-- Use MongoDB collections appropriately (see `ARCHITECTURE.md`)
+- Use MongoDB collections appropriately (see `docs/ARCHITECTURE.md`)
 - Create proper indexes for query patterns
 - Handle errors gracefully
 - Use transactions for multi-document operations
@@ -204,7 +204,7 @@ cargo test -- --nocapture
 
 Use the provided test data generators:
 ```bash
-./generate_test_data.sh
+./scripts/generate_test_data.sh
 ```
 
 ## 📚 Documentation
@@ -303,7 +303,7 @@ Contributors are recognized in several ways:
 
 ### Long-term Goals
 
-See our [roadmap](DESIGN.md#development-roadmap) for planned features and improvements.
+See our [roadmap](docs/DESIGN.md#development-roadmap) for planned features and improvements.
 
 ## ❓ Questions?
 
