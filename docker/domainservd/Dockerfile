@@ -27,8 +27,8 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd -r -s /bin/false -m -d /app appuser
+# Create non-root user with explicit UID
+RUN useradd -r -u 10001 -s /bin/false -m -d /app appuser
 
 WORKDIR /app
 
@@ -38,7 +38,7 @@ COPY --from=builder /app/target/release/domainservd ./domainservd
 # Change ownership to appuser
 RUN chown -R appuser:appuser /app
 
-USER appuser
+USER 10001
 
 EXPOSE 8080
 
