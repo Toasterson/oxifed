@@ -1,4 +1,6 @@
+mod context;
 mod messaging;
+mod resolve;
 
 use clap::{Parser, Subcommand};
 use messaging::LavinMQClient;
@@ -82,6 +84,12 @@ enum Commands {
     User {
         #[command(subcommand)]
         command: UserCommands,
+    },
+
+    /// Manage the current actor context
+    Context {
+        #[command(subcommand)]
+        command: ContextCommands,
     },
 }
 
@@ -202,29 +210,32 @@ enum NoteCommands {
 enum ActivityCommands {
     /// Create a "Follow" activity
     Follow {
-        /// Actor username or ID who is following
-        actor: String,
-
-        /// Object (user) being followed
+        /// Target to follow (user@domain or full URL)
         object: String,
+
+        /// Actor performing the follow (overrides context)
+        #[arg(long)]
+        actor: Option<String>,
     },
 
     /// Create a "Like" activity
     Like {
-        /// Actor username or ID who is liking
-        actor: String,
-
-        /// Object ID being liked
+        /// Object to like (user@domain or full URL)
         object: String,
+
+        /// Actor performing the like (overrides context)
+        #[arg(long)]
+        actor: Option<String>,
     },
 
     /// Create an "Announce" (boost/retweet) activity
     Announce {
-        /// Actor username or ID who is announcing
-        actor: String,
-
-        /// Object ID being announced
+        /// Object to announce (user@domain or full URL)
         object: String,
+
+        /// Actor performing the announce (overrides context)
+        #[arg(long)]
+        actor: Option<String>,
 
         /// Target audience (optional)
         #[arg(long)]
@@ -620,12 +631,33 @@ enum UserCommands {
     },
 }
 
+/// Commands for managing the actor context
+#[derive(Subcommand)]
+enum ContextCommands {
+    /// Set the current actor identity (e.g. user@domain)
+    Set {
+        /// Actor identifier (user@domain or full URL)
+        actor: String,
+    },
+
+    /// Show the current actor context
+    Show,
+
+    /// Clear the current actor context
+    Clear,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt().with_env_filter("info").init();
 
     let cli = Cli::parse();
+
+    // Handle context commands before creating AMQP connection (no network needed)
+    if let Commands::Context { command } = &cli.command {
+        return handle_context_command(command);
+    }
 
     // Use messaging via LavinMQ
     let lavin_client = LavinMQClient::new(&cli.amqp_url).await?;
@@ -899,8 +931,40 @@ async fn handle_command_messaging(client: &LavinMQClient, command: &Commands) ->
         Commands::User { command } => {
             handle_user_command_messaging(client, command).await?;
         }
+        Commands::Context { .. } => {
+            // Already handled before AMQP connection in main()
+            unreachable!("Context commands are handled before AMQP connection");
+        }
     }
 
+    Ok(())
+}
+
+/// Handle context commands (no network needed)
+fn handle_context_command(command: &ContextCommands) -> Result<()> {
+    match command {
+        ContextCommands::Set { actor } => {
+            let ctx = context::OxiadmContext {
+                context: context::ContextInner {
+                    actor: Some(actor.clone()),
+                },
+            };
+            context::save_context(&ctx)?;
+            println!("Actor context set to: {}", actor);
+        }
+        ContextCommands::Show => {
+            let ctx = context::load_context()?;
+            match ctx.context.actor {
+                Some(actor) => println!("{}", actor),
+                None => println!("No actor context set. Use: oxiadm context set user@domain"),
+            }
+        }
+        ContextCommands::Clear => {
+            let ctx = context::OxiadmContext::default();
+            context::save_context(&ctx)?;
+            println!("Actor context cleared");
+        }
+    }
     Ok(())
 }
 
@@ -1129,11 +1193,14 @@ async fn handle_activity_command_messaging(
 ) -> Result<()> {
     match command {
         ActivityCommands::Follow { actor, object } => {
-            // Create a structured message for Follow activity
-            let message =
-                oxifed::messaging::FollowActivityMessage::new(actor.clone(), object.clone());
+            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
+            let resolved_object = resolve::resolve_target(object).await?;
 
-            // Send to LavinMQ
+            let message = oxifed::messaging::FollowActivityMessage::new(
+                resolved_actor.clone(),
+                resolved_object.clone(),
+            );
+
             client
                 .publish_message(&message)
                 .await
@@ -1142,16 +1209,19 @@ async fn handle_activity_command_messaging(
 
             println!(
                 "'Follow' activity request from '{}' for object '{}' sent to message queue",
-                actor, object
+                resolved_actor, resolved_object
             );
         }
 
         ActivityCommands::Like { actor, object } => {
-            // Create a structured message for Like activity
-            let message =
-                oxifed::messaging::LikeActivityMessage::new(actor.clone(), object.clone());
+            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
+            let resolved_object = resolve::resolve_target(object).await?;
 
-            // Send to LavinMQ
+            let message = oxifed::messaging::LikeActivityMessage::new(
+                resolved_actor.clone(),
+                resolved_object.clone(),
+            );
+
             client
                 .publish_message(&message)
                 .await
@@ -1160,7 +1230,7 @@ async fn handle_activity_command_messaging(
 
             println!(
                 "'Like' activity request from '{}' for object '{}' sent to message queue",
-                actor, object
+                resolved_actor, resolved_object
             );
         }
 
@@ -1170,15 +1240,16 @@ async fn handle_activity_command_messaging(
             to,
             cc,
         } => {
-            // Create a structured message for Announce activity
+            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
+            let resolved_object = resolve::resolve_target(object).await?;
+
             let message = oxifed::messaging::AnnounceActivityMessage::new(
-                actor.clone(),
-                object.clone(),
+                resolved_actor.clone(),
+                resolved_object.clone(),
                 to.clone(),
                 cc.clone(),
             );
 
-            // Send to LavinMQ
             client
                 .publish_message(&message)
                 .await
@@ -1187,7 +1258,7 @@ async fn handle_activity_command_messaging(
 
             println!(
                 "'Announce' activity request from '{}' for object '{}' sent to message queue",
-                actor, object
+                resolved_actor, resolved_object
             );
         }
     }

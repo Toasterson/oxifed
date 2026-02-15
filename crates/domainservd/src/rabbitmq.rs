@@ -911,11 +911,14 @@ async fn handle_follow(
             .unwrap_or_default();
         let username = path_segments.last().copied().unwrap_or("unknown");
         (username.to_string(), domain.to_string())
+    } else if msg.actor.contains('@') {
+        // user@domain format
+        split_subject(&msg.actor)?
     } else {
-        // Just username provided, use default local domain
-        // For now, we'll use "testfed.local" as the default domain for testing
-        // In production, this should come from configuration
-        (msg.actor.clone(), "testfed.local".to_string())
+        return Err(RabbitMQError::JsonError(serde_json::Error::custom(format!(
+            "Actor '{}' must be a full URL or user@domain format",
+            msg.actor
+        ))));
     };
 
     // Verify the local domain exists (where the follower is from)

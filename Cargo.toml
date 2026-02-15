@@ -30,6 +30,8 @@ axum = "0.8"
 futures = "0.3"
 regex = "1"
 hex = "0.4"
+dirs = "6"
+toml = "0.8"
 
 [workspace.metadata.release]
 publish = false
