@@ -775,12 +775,27 @@ async fn handle_add_server(hostname: &str, client_id: Option<&str>) -> Result<()
         })?
         .clone();
 
+    // Extract optional OAuth audience
+    let audience = jrd
+        .find_link("https://oxifed.io/ns/oauth-audience")
+        .and_then(|link| link.href.clone());
+
     println!("  Admin API: {}", admin_api_url);
     println!("  OIDC Issuer: {}", issuer_url);
+    if let Some(ref aud) = audience {
+        println!("  OAuth Audience: {}", aud);
+    }
     println!();
 
     // Perform OIDC device code login
-    auth::device_code_login_for_server(hostname, &admin_api_url, &issuer_url, client_id).await?;
+    auth::device_code_login_for_server(
+        hostname,
+        &admin_api_url,
+        &issuer_url,
+        client_id,
+        audience.as_deref(),
+    )
+    .await?;
 
     println!();
     println!("Server '{}' added and set as current.", hostname);

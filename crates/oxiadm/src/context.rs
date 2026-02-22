@@ -53,6 +53,9 @@ pub struct ServerConfig {
     /// OIDC issuer URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub issuer_url: Option<String>,
+    /// OAuth audience required by the admin API
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audience: Option<String>,
     /// OIDC client ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
@@ -161,6 +164,7 @@ impl OxiadmContext {
                 hostname: hostname.clone(),
                 admin_api_url: String::new(), // Will need to be re-discovered
                 issuer_url: self.auth.issuer_url.clone(),
+                audience: None,
                 client_id: self.auth.client_id.clone(),
                 client_secret: self.auth.client_secret.clone(),
                 access_token: self.auth.access_token.clone(),

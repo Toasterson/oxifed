@@ -150,6 +150,16 @@ fn build_domain_jrd(
         });
     }
 
+    if let Some(ref audience) = state.oidc_audience {
+        links.push(Link {
+            rel: "https://oxifed.io/ns/oauth-audience".to_string(),
+            href: Some(audience.clone()),
+            type_: None,
+            titles: None,
+            properties: None,
+        });
+    }
+
     if let Some(ref issuer_url) = state.oidc_issuer_url {
         links.push(Link {
             rel: "http://openid.net/specs/connect/1.0/issuer".to_string(),

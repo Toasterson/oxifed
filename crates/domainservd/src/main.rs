@@ -37,6 +37,8 @@ pub struct AppState {
     pub admin_api_url: Option<String>,
     /// OIDC issuer URL advertised via domain-level WebFinger
     pub oidc_issuer_url: Option<String>,
+    /// OIDC audience the admin API expects in tokens
+    pub oidc_audience: Option<String>,
 }
 
 /// Errors that can occur in the domainservd service
@@ -124,6 +126,7 @@ async fn main() -> Result<(), DomainservdError> {
     // Read optional discovery URLs for domain-level WebFinger
     let admin_api_url = std::env::var("ADMIN_API_URL").ok();
     let oidc_issuer_url = std::env::var("OIDC_ISSUER_URL").ok();
+    let oidc_audience = std::env::var("OIDC_AUDIENCE").ok();
 
     // Create an application state
     let app_state = AppState {
@@ -133,6 +136,7 @@ async fn main() -> Result<(), DomainservdError> {
         pki_manager: pki_manager.clone(),
         admin_api_url,
         oidc_issuer_url,
+        oidc_audience,
     };
 
     // Start message consumer in a separate task

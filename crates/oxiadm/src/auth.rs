@@ -108,6 +108,7 @@ async fn discover_metadata(client: &reqwest::Client, issuer_url: &str) -> Result
 async fn run_device_code_flow(
     issuer_url: &str,
     client_id: Option<&str>,
+    audience: Option<&str>,
 ) -> Result<(TokenResponse, String, Option<String>)> {
     let client = reqwest::Client::new();
 
@@ -126,6 +127,9 @@ async fn run_device_code_flow(
     let mut form_params = vec![("scope", "openid profile"), ("client_name", "oxiadm")];
     if let Some(id) = client_id {
         form_params.push(("client_id", id));
+    }
+    if let Some(aud) = audience {
+        form_params.push(("audience", aud));
     }
 
     let response = client
@@ -264,8 +268,10 @@ pub async fn device_code_login(issuer_url: Option<&str>, client_id: Option<&str>
         })?,
     };
 
+    let audience = server.audience.as_deref();
+
     let (token_response, effective_client_id, auto_client_secret) =
-        run_device_code_flow(&effective_issuer, client_id).await?;
+        run_device_code_flow(&effective_issuer, client_id, audience).await?;
 
     let expires_at = token_response.expires_in.map(|secs| {
         let expiry = Utc::now() + chrono::Duration::seconds(secs as i64);
@@ -295,9 +301,10 @@ pub async fn device_code_login_for_server(
     admin_api_url: &str,
     issuer_url: &str,
     client_id: Option<&str>,
+    audience: Option<&str>,
 ) -> Result<()> {
     let (token_response, effective_client_id, auto_client_secret) =
-        run_device_code_flow(issuer_url, client_id).await?;
+        run_device_code_flow(issuer_url, client_id, audience).await?;
 
     let expires_at = token_response.expires_in.map(|secs| {
         let expiry = Utc::now() + chrono::Duration::seconds(secs as i64);
@@ -310,6 +317,7 @@ pub async fn device_code_login_for_server(
         hostname: hostname.to_string(),
         admin_api_url: admin_api_url.to_string(),
         issuer_url: Some(issuer_url.to_string()),
+        audience: audience.map(|s| s.to_string()),
         client_id: Some(effective_client_id),
         client_secret: auto_client_secret,
         access_token: Some(token_response.access_token),
