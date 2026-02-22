@@ -160,9 +160,7 @@ async fn validate_opaque_token(
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|e| {
-            ApiError::InvalidToken(format!("Userinfo request failed: {}", e))
-        })?;
+        .map_err(|e| ApiError::InvalidToken(format!("Userinfo request failed: {}", e)))?;
 
     if !response.status().is_success() {
         return Err(ApiError::InvalidToken(format!(
@@ -171,9 +169,10 @@ async fn validate_opaque_token(
         )));
     }
 
-    let info: UserinfoResponse = response.json().await.map_err(|e| {
-        ApiError::InvalidToken(format!("Failed to parse userinfo response: {}", e))
-    })?;
+    let info: UserinfoResponse = response
+        .json()
+        .await
+        .map_err(|e| ApiError::InvalidToken(format!("Failed to parse userinfo response: {}", e)))?;
 
     Ok(AuthenticatedUser { sub: info.sub })
 }
