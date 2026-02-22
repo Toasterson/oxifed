@@ -80,20 +80,18 @@ async fn handle_webfinger(
     }
 
     // Check if this is a domain-level query (e.g. resource=https://oxifed.io)
-    if query.resource.starts_with("https://") {
-        if let Ok(url) = Url::parse(&query.resource) {
-            let is_domain_query = url.path() == "/" || url.path().is_empty();
-            if is_domain_query {
-                if let Some(hostname) = url.host_str() {
-                    // Check if this hostname is a registered domain
-                    if let Ok(Some(_)) = state.db_manager.find_domain_by_name(hostname).await {
-                        return Ok(Json(build_domain_jrd(
-                            &query.resource,
-                            &state,
-                            &query.relations,
-                        )));
-                    }
-                }
+    if query.resource.starts_with("https://")
+        && let Ok(url) = Url::parse(&query.resource)
+    {
+        let is_domain_query = url.path() == "/" || url.path().is_empty();
+        if is_domain_query && let Some(hostname) = url.host_str() {
+            // Check if this hostname is a registered domain
+            if let Ok(Some(_)) = state.db_manager.find_domain_by_name(hostname).await {
+                return Ok(Json(build_domain_jrd(
+                    &query.resource,
+                    &state,
+                    &query.relations,
+                )));
             }
         }
     }
@@ -113,6 +111,22 @@ async fn handle_webfinger(
         debug!("Webfinger resource not found in database: {}", subject);
         WebfingerError::ResourceNotFound(subject)
     })?;
+
+    // Ensure a "self" link exists — older profiles may have been stored without one
+    let has_self_link = jrd
+        .links
+        .as_ref()
+        .is_some_and(|links| links.iter().any(|l| l.rel == "self"));
+    if !has_self_link && let Some(actor_url) = jrd.aliases.as_ref().and_then(|a| a.first()) {
+        let self_link = Link {
+            rel: "self".to_string(),
+            type_: Some("application/activity+json".to_string()),
+            href: Some(actor_url.clone()),
+            titles: None,
+            properties: None,
+        };
+        jrd.links.get_or_insert_with(Vec::new).push(self_link);
+    }
 
     // Filter relations if requested
     if let Some(relations) = &query.relations

@@ -1898,7 +1898,7 @@ async fn create_webfinger_profile(
     db: &Arc<MongoDB>,
     subject: &str,
     aliases: Option<Vec<String>>,
-    _links: Option<Vec<oxifed::webfinger::Link>>,
+    links: Option<Vec<oxifed::webfinger::Link>>,
 ) -> Result<(), RabbitMQError> {
     // Format the subject with the appropriate prefix
     let formatted_subject = format_subject(subject);
@@ -1928,12 +1928,25 @@ async fn create_webfinger_profile(
         )));
     }
 
+    // Build links: use provided links or generate a self link from the first alias
+    let links = links.or_else(|| {
+        aliases.as_ref().and_then(|a| a.first()).map(|actor_url| {
+            vec![oxifed::webfinger::Link {
+                rel: "self".to_string(),
+                type_: Some("application/activity+json".to_string()),
+                href: Some(actor_url.clone()),
+                titles: None,
+                properties: None,
+            }]
+        })
+    });
+
     // Create a new Webfinger profile
     let resource = oxifed::webfinger::JrdResource {
         subject: Some(formatted_subject.clone()),
         aliases,
         properties: None,
-        links: None,
+        links,
     };
 
     // Insert the new profile
