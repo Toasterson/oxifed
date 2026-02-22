@@ -112,16 +112,18 @@ async fn handle_webfinger(
         WebfingerError::ResourceNotFound(subject)
     })?;
 
-    // Ensure a "self" link exists — older profiles may have been stored without one
+    // Ensure a "self" link exists — older profiles may have been stored without one.
+    // Derive the actor URL from the alias (/@user → /users/user).
     let has_self_link = jrd
         .links
         .as_ref()
         .is_some_and(|links| links.iter().any(|l| l.rel == "self"));
-    if !has_self_link && let Some(actor_url) = jrd.aliases.as_ref().and_then(|a| a.first()) {
+    if !has_self_link && let Some(alias) = jrd.aliases.as_ref().and_then(|a| a.first()) {
+        let actor_url = alias.replace("/@", "/users/");
         let self_link = Link {
             rel: "self".to_string(),
             type_: Some("application/activity+json".to_string()),
-            href: Some(actor_url.clone()),
+            href: Some(actor_url),
             titles: None,
             properties: None,
         };

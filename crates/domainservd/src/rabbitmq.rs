@@ -1891,12 +1891,13 @@ async fn create_person_object(
         RabbitMQError::DbError(crate::db::DbError::DatabaseError(e))
     })?;
 
-    create_webfinger_profile(db, &message.subject, Some(aliases), None).await
+    create_webfinger_profile(db, &message.subject, &actor_id, Some(aliases), None).await
 }
 
 async fn create_webfinger_profile(
     db: &Arc<MongoDB>,
     subject: &str,
+    actor_url: &str,
     aliases: Option<Vec<String>>,
     links: Option<Vec<oxifed::webfinger::Link>>,
 ) -> Result<(), RabbitMQError> {
@@ -1928,18 +1929,17 @@ async fn create_webfinger_profile(
         )));
     }
 
-    // Build links: use provided links or generate a self link from the first alias
-    let links = links.or_else(|| {
-        aliases.as_ref().and_then(|a| a.first()).map(|actor_url| {
-            vec![oxifed::webfinger::Link {
-                rel: "self".to_string(),
-                type_: Some("application/activity+json".to_string()),
-                href: Some(actor_url.clone()),
-                titles: None,
-                properties: None,
-            }]
-        })
+    // Build links: use provided links or generate a self link from the actor URL
+    let links = links.unwrap_or_else(|| {
+        vec![oxifed::webfinger::Link {
+            rel: "self".to_string(),
+            type_: Some("application/activity+json".to_string()),
+            href: Some(actor_url.to_string()),
+            titles: None,
+            properties: None,
+        }]
     });
+    let links = Some(links);
 
     // Create a new Webfinger profile
     let resource = oxifed::webfinger::JrdResource {
@@ -2550,7 +2550,7 @@ async fn create_user(db: &Arc<MongoDB>, message: &UserCreateMessage) -> Result<(
     let subject = format!("{}@{}", username, domain);
     let aliases = vec![format!("https://{}/@{}", domain, username)];
 
-    create_webfinger_profile(db, &subject, Some(aliases), None).await?;
+    create_webfinger_profile(db, &subject, &actor_id, Some(aliases), None).await?;
 
     info!("User '{}@{}' created successfully", username, domain);
     Ok(())
