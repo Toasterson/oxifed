@@ -622,6 +622,109 @@ impl HttpSignature {
         Ok(())
     }
 
+    /// Sign a request using the legacy draft-cavage HTTP Signatures format.
+    ///
+    /// This produces a single `Signature` header with `keyId`, `algorithm`, `headers`,
+    /// and `signature` fields — the format expected by Mastodon and most ActivityPub
+    /// implementations.
+    pub fn sign_request_legacy(
+        req: &mut Request,
+        config: &SignatureConfig,
+    ) -> Result<(), SignatureError> {
+        // Build the signing string in draft-cavage format
+        let mut headers_list = Vec::new();
+        let mut signing_lines = Vec::new();
+
+        for component in &config.components {
+            match component {
+                ComponentIdentifier::RequestTarget => {
+                    headers_list.push("(request-target)".to_string());
+                    let method = req.method().as_str().to_lowercase();
+                    let path_and_query = if let Some(query) = req.url().query() {
+                        format!("{}?{}", req.url().path(), query)
+                    } else {
+                        req.url().path().to_string()
+                    };
+                    signing_lines.push(format!("(request-target): {} {}", method, path_and_query));
+                }
+                ComponentIdentifier::Header(name) => {
+                    headers_list.push(name.to_lowercase());
+                    let header = HeaderName::from_str(name)
+                        .map_err(|_| SignatureError::InvalidHeader(name.clone()))?;
+                    let value = req
+                        .headers()
+                        .get(&header)
+                        .ok_or_else(|| {
+                            SignatureError::InvalidHeader(format!("Header not found: {}", name))
+                        })?
+                        .to_str()
+                        .map_err(|_| {
+                            SignatureError::InvalidHeader(format!(
+                                "Non-ASCII value in header: {}",
+                                name
+                            ))
+                        })?;
+                    signing_lines.push(format!("{}: {}", name.to_lowercase(), value));
+                }
+                ComponentIdentifier::Digest => {
+                    headers_list.push("digest".to_string());
+                    let digest = req
+                        .headers()
+                        .get("digest")
+                        .ok_or_else(|| {
+                            SignatureError::InvalidHeader("Digest header not found".to_string())
+                        })?
+                        .to_str()
+                        .map_err(|_| {
+                            SignatureError::InvalidHeader(
+                                "Non-ASCII value in Digest header".to_string(),
+                            )
+                        })?;
+                    signing_lines.push(format!("digest: {}", digest));
+                }
+                _ => {
+                    // Skip RFC 9421-only components like @method, @target-uri
+                }
+            }
+        }
+
+        let signing_string = signing_lines.join("\n");
+
+        // Sign the string
+        let rng = ring::rand::SystemRandom::new();
+        let signature = Self::create_signature(
+            &signing_string,
+            &config.algorithm,
+            &config.private_key,
+            &rng,
+        )?;
+
+        // Map algorithm name to draft-cavage convention
+        let algorithm_name = match &config.algorithm {
+            SignatureAlgorithm::RsaSha256 => "rsa-sha256",
+            SignatureAlgorithm::Ed25519 => "ed25519",
+            SignatureAlgorithm::EcdsaP256Sha256 => "ecdsa-sha256",
+            SignatureAlgorithm::RsaPssSha512 => "rsa-pss-sha512",
+        };
+
+        // Build the Signature header value
+        let sig_header = format!(
+            "keyId=\"{}\",algorithm=\"{}\",headers=\"{}\",signature=\"{}\"",
+            config.key_id,
+            algorithm_name,
+            headers_list.join(" "),
+            signature,
+        );
+
+        let header_value = HeaderValue::from_str(&sig_header)
+            .map_err(|_| SignatureError::InvalidHeader("Invalid Signature header".to_string()))?;
+
+        req.headers_mut()
+            .insert(HeaderName::from_static("signature"), header_value);
+
+        Ok(())
+    }
+
     /// Verify a signature on a request using the given verification configuration
     pub fn verify_request(
         req: &Request,

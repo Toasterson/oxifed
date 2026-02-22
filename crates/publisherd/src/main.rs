@@ -305,8 +305,7 @@ impl PublisherDaemon {
                             parameters: SignatureParameters::new(),
                             key_id,
                             components: vec![
-                                ComponentIdentifier::Method,
-                                ComponentIdentifier::TargetUri,
+                                ComponentIdentifier::RequestTarget,
                                 ComponentIdentifier::Header("host".to_string()),
                                 ComponentIdentifier::Header("date".to_string()),
                                 ComponentIdentifier::Header("content-type".to_string()),

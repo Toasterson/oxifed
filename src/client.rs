@@ -103,11 +103,10 @@ impl ActivityPubClient {
         Ok(headers)
     }
 
-    /// Sign a request using HTTP Signatures if configured
+    /// Sign a request using HTTP Signatures (legacy draft-cavage format for Mastodon compatibility)
     fn sign_request(&self, request: &mut reqwest::Request) -> Result<()> {
         if let Some(config) = &self.config.http_signature_config {
-            // Sign the request directly using the updated HttpSignature
-            HttpSignature::sign_request(request, config)?;
+            HttpSignature::sign_request_legacy(request, config)?;
         }
 
         Ok(())
@@ -204,13 +203,32 @@ impl ActivityPubClient {
     }
 
     async fn try_send_to_inbox(&self, inbox_url: &Url, activity: &Activity) -> Result<()> {
+        // Serialize the body first so we can compute the digest
+        let body_bytes = serde_json::to_vec(activity)?;
+
         let mut request = self
             .client
             .post(inbox_url.clone())
             .headers(self.default_headers()?)
             .header(CONTENT_TYPE, ACTIVITYPUB_CONTENT_TYPE)
-            .json(activity)
+            .body(body_bytes.clone())
             .build()?;
+
+        // Add Date and Digest headers required for HTTP Signature verification
+        let date = chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S GMT");
+        request.headers_mut().insert(
+            reqwest::header::DATE,
+            HeaderValue::from_str(&date.to_string()).map_err(ClientError::InvalidHeader)?,
+        );
+
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(&body_bytes);
+        let digest_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, digest);
+        request.headers_mut().insert(
+            reqwest::header::HeaderName::from_static("digest"),
+            HeaderValue::from_str(&format!("SHA-256={}", digest_b64))
+                .map_err(ClientError::InvalidHeader)?,
+        );
 
         // Sign the request if configured
         self.sign_request(&mut request)?;
