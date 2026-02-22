@@ -1,0 +1,5 @@
+[advisories]
+# RUSTSEC-2023-0071: Marvin Attack on `rsa` crate's PKCS#1 v1.5 decryption.
+# We only use the `rsa` crate for key generation and signing, not decryption,
+# so this timing side-channel does not apply.
+ignore = ["RUSTSEC-2023-0071"]
