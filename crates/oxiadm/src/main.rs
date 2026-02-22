@@ -91,12 +91,12 @@ enum Commands {
     /// Authenticate with the admin API using OIDC Device Code Grant
     Login {
         /// OIDC issuer URL (e.g. https://id.example.com)
-        #[arg(long)]
+        #[arg(long, env = "OIDC_ISSUER_URL")]
         issuer_url: String,
 
-        /// OIDC client ID
+        /// OIDC client ID (omit to use provider auto-registration)
         #[arg(long)]
-        client_id: String,
+        client_id: Option<String>,
     },
 
     /// Clear stored authentication tokens
@@ -684,7 +684,7 @@ async fn main() -> Result<()> {
         Commands::Login {
             issuer_url,
             client_id,
-        } => return auth::device_code_login(issuer_url, client_id).await,
+        } => return auth::device_code_login(issuer_url, client_id.as_deref()).await,
         Commands::Logout => return auth::logout(),
         _ => {}
     }

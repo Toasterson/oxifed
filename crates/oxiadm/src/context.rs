@@ -28,6 +28,8 @@ pub struct AuthContext {
     pub issuer_url: Option<String>,
     /// OIDC client ID
     pub client_id: Option<String>,
+    /// OIDC client secret (from auto-registration)
+    pub client_secret: Option<String>,
     /// OAuth2 access token
     pub access_token: Option<String>,
     /// OAuth2 refresh token
@@ -93,7 +95,7 @@ pub fn get_access_token() -> Result<String> {
     let ctx = load_context()?;
     ctx.auth.access_token.ok_or_else(|| {
         miette!(
-            help = "Log in first with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            help = "Log in first with: oxiadm login --issuer-url <URL>",
             "No access token found — you are not logged in"
         )
     })

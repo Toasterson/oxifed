@@ -119,7 +119,7 @@ impl AdminApiClient {
 
         if status == StatusCode::UNAUTHORIZED {
             return Err(miette!(
-                help = "Your token may have expired. Try: oxiadm login --issuer-url <URL> --client-id <ID>",
+                help = "Your token may have expired. Try: oxiadm login --issuer-url <URL>",
                 "Authentication failed (401 Unauthorized)"
             ));
         }
@@ -151,7 +151,7 @@ impl AdminApiClient {
 
         if status == StatusCode::UNAUTHORIZED {
             return Err(miette!(
-                help = "Your token may have expired. Try: oxiadm login --issuer-url <URL> --client-id <ID>",
+                help = "Your token may have expired. Try: oxiadm login --issuer-url <URL>",
                 "Authentication failed (401 Unauthorized)"
             ));
         }

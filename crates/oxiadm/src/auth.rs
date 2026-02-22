@@ -27,6 +27,10 @@ struct DeviceAuthResponse {
     #[serde(default = "default_interval")]
     interval: u64,
     expires_in: u64,
+    /// Returned by providers that support client auto-registration
+    client_id: Option<String>,
+    /// Returned by providers that support client auto-registration
+    client_secret: Option<String>,
 }
 
 fn default_interval() -> u64 {
@@ -54,6 +58,8 @@ struct DeviceTokenRequest<'a> {
     grant_type: &'a str,
     device_code: &'a str,
     client_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_secret: Option<&'a str>,
 }
 
 /// Refresh token request body
@@ -62,6 +68,8 @@ struct RefreshTokenRequest<'a> {
     grant_type: &'a str,
     refresh_token: &'a str,
     client_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_secret: Option<&'a str>,
 }
 
 /// Discover OIDC metadata from the issuer URL
@@ -94,7 +102,11 @@ async fn discover_metadata(client: &reqwest::Client, issuer_url: &str) -> Result
 }
 
 /// Perform Device Code Grant login flow
-pub async fn device_code_login(issuer_url: &str, client_id: &str) -> Result<()> {
+///
+/// If `client_id` is `None`, the provider's auto-registration is used:
+/// the device authorization request is sent without a `client_id`, and the
+/// provider returns auto-registered `client_id`/`client_secret` in the response.
+pub async fn device_code_login(issuer_url: &str, client_id: Option<&str>) -> Result<()> {
     let client = reqwest::Client::new();
 
     // Discover OIDC endpoints
@@ -108,10 +120,15 @@ pub async fn device_code_login(issuer_url: &str, client_id: &str) -> Result<()> 
         )
     })?;
 
-    // Request device authorization
+    // Request device authorization — with or without client_id
+    let mut form_params = vec![("scope", "openid profile"), ("client_name", "oxiadm")];
+    if let Some(id) = client_id {
+        form_params.push(("client_id", id));
+    }
+
     let response = client
         .post(&device_auth_endpoint)
-        .form(&[("client_id", client_id), ("scope", "openid profile")])
+        .form(&form_params)
         .send()
         .await
         .into_diagnostic()
@@ -127,6 +144,19 @@ pub async fn device_code_login(issuer_url: &str, client_id: &str) -> Result<()> 
         .await
         .into_diagnostic()
         .map_err(|e| miette!("Failed to parse device authorization response: {}", e))?;
+
+    // Resolve the client_id to use for token polling:
+    // either the one we sent, or the auto-registered one from the response
+    let effective_client_id = match client_id {
+        Some(id) => id.to_string(),
+        None => device_auth.client_id.clone().ok_or_else(|| {
+            miette!(
+                help = "Try again with an explicit --client-id",
+                "Provider did not return a client_id from auto-registration"
+            )
+        })?,
+    };
+    let effective_client_secret = device_auth.client_secret.as_deref();
 
     // Display instructions to the user
     println!();
@@ -147,10 +177,7 @@ pub async fn device_code_login(issuer_url: &str, client_id: &str) -> Result<()> 
 
         if tokio::time::Instant::now() > deadline {
             return Err(miette!(
-                help = format!(
-                    "Try again with: oxiadm login --issuer-url {} --client-id {}",
-                    issuer_url, client_id
-                ),
+                help = "Try again with: oxiadm login --issuer-url <URL>",
                 "Device authorization timed out"
             ));
         }
@@ -160,7 +187,8 @@ pub async fn device_code_login(issuer_url: &str, client_id: &str) -> Result<()> 
             .form(&DeviceTokenRequest {
                 grant_type: "urn:ietf:params:oauth:grant-type:device_code",
                 device_code: &device_auth.device_code,
-                client_id,
+                client_id: &effective_client_id,
+                client_secret: effective_client_secret,
             })
             .send()
             .await
@@ -192,10 +220,7 @@ pub async fn device_code_login(issuer_url: &str, client_id: &str) -> Result<()> 
                 }
                 "expired_token" => {
                     return Err(miette!(
-                        help = format!(
-                            "Try again with: oxiadm login --issuer-url {} --client-id {}",
-                            issuer_url, client_id
-                        ),
+                        help = "Try again with: oxiadm login --issuer-url <URL>",
                         "Device code expired before authorization was completed"
                     ));
                 }
@@ -226,7 +251,8 @@ pub async fn device_code_login(issuer_url: &str, client_id: &str) -> Result<()> 
     let mut ctx = context::load_context()?;
     ctx.auth = AuthContext {
         issuer_url: Some(issuer_url.to_string()),
-        client_id: Some(client_id.to_string()),
+        client_id: Some(effective_client_id),
+        client_secret: device_auth.client_secret,
         access_token: Some(token_response.access_token),
         refresh_token: token_response.refresh_token,
         expires_at,
@@ -244,7 +270,7 @@ pub async fn refresh_token_if_needed() -> Result<()> {
     // Check if we have a token at all
     if ctx.auth.access_token.is_none() {
         return Err(miette!(
-            help = "Log in first with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            help = "Log in first with: oxiadm login --issuer-url <URL>",
             "No access token found — you are not logged in"
         ));
     }
@@ -269,24 +295,26 @@ pub async fn refresh_token_if_needed() -> Result<()> {
     // Need to refresh
     let refresh_token = ctx.auth.refresh_token.as_ref().ok_or_else(|| {
         miette!(
-            help = "Log in again with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            help = "Log in again with: oxiadm login --issuer-url <URL>",
             "Token expired and no refresh token available"
         )
     })?;
 
     let issuer_url = ctx.auth.issuer_url.as_ref().ok_or_else(|| {
         miette!(
-            help = "Log in again with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            help = "Log in again with: oxiadm login --issuer-url <URL>",
             "No issuer URL stored — cannot refresh token"
         )
     })?;
 
     let client_id = ctx.auth.client_id.as_ref().ok_or_else(|| {
         miette!(
-            help = "Log in again with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            help = "Log in again with: oxiadm login --issuer-url <URL>",
             "No client ID stored — cannot refresh token"
         )
     })?;
+
+    let client_secret = ctx.auth.client_secret.as_deref();
 
     let http_client = reqwest::Client::new();
     let metadata = discover_metadata(&http_client, issuer_url).await?;
@@ -297,6 +325,7 @@ pub async fn refresh_token_if_needed() -> Result<()> {
             grant_type: "refresh_token",
             refresh_token,
             client_id,
+            client_secret,
         })
         .send()
         .await
@@ -306,7 +335,7 @@ pub async fn refresh_token_if_needed() -> Result<()> {
     if !response.status().is_success() {
         let body = response.text().await.unwrap_or_default();
         return Err(miette!(
-            help = "Log in again with: oxiadm login --issuer-url <URL> --client-id <ID>",
+            help = "Log in again with: oxiadm login --issuer-url <URL>",
             "Token refresh failed: {}",
             body
         ));
