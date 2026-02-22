@@ -123,6 +123,15 @@ jobs:
           build-args: |
             SERVICE=${{ matrix.service }}
 
+      - name: Notify Keel of new image
+        if: success()
+        run: |
+          TAG="${{ steps.meta.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}"
+          curl -s -X POST "${{ secrets.KEEL_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\": \"${IMAGE}\", \"tag\": \"${TAG}\"}"
+
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
