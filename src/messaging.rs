@@ -16,6 +16,7 @@ pub const EXCHANGE_RPC_RESPONSE: &str = "oxifed.rpc.response";
 
 /// Constants for RabbitMQ Queue names
 pub const QUEUE_RPC_DOMAIN: &str = "oxifed.rpc.domain";
+pub const QUEUE_RPC_FOLLOW: &str = "oxifed.rpc.follow";
 
 /// Message trait that must be implemented by all message types
 pub trait Message {
@@ -47,6 +48,8 @@ pub enum MessageEnum {
     UserCreateMessage(UserCreateMessage),
     UserRpcRequest(UserRpcRequest),
     UserRpcResponse(UserRpcResponse),
+    FollowRpcRequest(FollowRpcRequest),
+    FollowRpcResponse(FollowRpcResponse),
 }
 
 /// Message format for profile creation requests
@@ -841,5 +844,94 @@ impl UserRpcResponse {
 impl Message for UserRpcResponse {
     fn to_message(&self) -> MessageEnum {
         MessageEnum::UserRpcResponse(self.clone())
+    }
+}
+
+/// RPC request message for follow queries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FollowRpcRequest {
+    pub request_id: String,
+    pub request_type: FollowRpcRequestType,
+}
+
+/// Types of follow RPC requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FollowRpcRequestType {
+    /// List accounts the given actor is following (outgoing follows)
+    ListFollowing { actor: String },
+    /// List accounts that follow the given actor (incoming follows)
+    ListFollowers { actor: String },
+}
+
+impl FollowRpcRequest {
+    /// Create a request to list who an actor is following
+    pub fn list_following(request_id: String, actor: String) -> Self {
+        Self {
+            request_id,
+            request_type: FollowRpcRequestType::ListFollowing { actor },
+        }
+    }
+
+    /// Create a request to list an actor's followers
+    pub fn list_followers(request_id: String, actor: String) -> Self {
+        Self {
+            request_id,
+            request_type: FollowRpcRequestType::ListFollowers { actor },
+        }
+    }
+}
+
+impl Message for FollowRpcRequest {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::FollowRpcRequest(self.clone())
+    }
+}
+
+/// RPC response message for follow queries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FollowRpcResponse {
+    pub request_id: String,
+    pub result: FollowRpcResult,
+}
+
+/// Results of follow RPC requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FollowRpcResult {
+    FollowList { follows: Vec<FollowInfo> },
+    Error { message: String },
+}
+
+/// Follow relationship information for RPC responses
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FollowInfo {
+    pub follower: String,
+    pub following: String,
+    pub status: String,
+    pub activity_id: String,
+    pub created_at: String,
+    pub responded_at: Option<String>,
+}
+
+impl FollowRpcResponse {
+    /// Create a follow list response
+    pub fn follow_list(request_id: String, follows: Vec<FollowInfo>) -> Self {
+        Self {
+            request_id,
+            result: FollowRpcResult::FollowList { follows },
+        }
+    }
+
+    /// Create an error response
+    pub fn error(request_id: String, message: String) -> Self {
+        Self {
+            request_id,
+            result: FollowRpcResult::Error { message },
+        }
+    }
+}
+
+impl Message for FollowRpcResponse {
+    fn to_message(&self) -> MessageEnum {
+        MessageEnum::FollowRpcResponse(self.clone())
     }
 }

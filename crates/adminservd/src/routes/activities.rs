@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use oxifed::messaging::{AnnounceActivityMessage, FollowActivityMessage, LikeActivityMessage};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -72,4 +72,35 @@ pub async fn announce(
         axum::http::StatusCode::ACCEPTED,
         Json(json!({"status": "queued"})),
     ))
+}
+
+#[derive(Deserialize)]
+pub struct FollowsQuery {
+    pub actor: String,
+}
+
+pub async fn list_following(
+    State(state): State<AppState>,
+    _user: AuthenticatedUser,
+    Query(query): Query<FollowsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let follows = messaging::list_following(&state.mq_pool, &query.actor)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(serde_json::to_value(follows).map_err(|e| {
+        ApiError::Internal(format!("Serialization error: {}", e))
+    })?))
+}
+
+pub async fn list_followers(
+    State(state): State<AppState>,
+    _user: AuthenticatedUser,
+    Query(query): Query<FollowsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let follows = messaging::list_followers(&state.mq_pool, &query.actor)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(serde_json::to_value(follows).map_err(|e| {
+        ApiError::Internal(format!("Serialization error: {}", e))
+    })?))
 }

@@ -5,7 +5,7 @@
 use miette::{IntoDiagnostic, Result, miette};
 use oxifed::messaging::{
     AnnounceActivityMessage, DomainCreateMessage, DomainInfo, DomainUpdateMessage,
-    FollowActivityMessage, KeyGenerateMessage, LikeActivityMessage, NoteCreateMessage,
+    FollowActivityMessage, FollowInfo, KeyGenerateMessage, LikeActivityMessage, NoteCreateMessage,
     NoteUpdateMessage, ProfileCreateMessage, ProfileUpdateMessage, UserCreateMessage, UserInfo,
 };
 use reqwest::StatusCode;
@@ -38,6 +38,26 @@ impl AdminApiClient {
             .client
             .get(&url)
             .bearer_auth(&self.access_token)
+            .send()
+            .await
+            .into_diagnostic()
+            .map_err(|e| miette!("HTTP request failed: {}", e))?;
+
+        Self::handle_response(response).await
+    }
+
+    /// Send an authenticated GET request with query parameters
+    async fn get_with_query<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let response = self
+            .client
+            .get(&url)
+            .bearer_auth(&self.access_token)
+            .query(query)
             .send()
             .await
             .into_diagnostic()
@@ -257,6 +277,18 @@ impl AdminApiClient {
     ) -> Result<()> {
         let message = AnnounceActivityMessage::new(actor.to_string(), object.to_string(), to, cc);
         self.post("/api/v1/activities/announce", &message).await
+    }
+
+    // --- Follow query operations ---
+
+    pub async fn list_following(&self, actor: &str) -> Result<Vec<FollowInfo>> {
+        self.get_with_query("/api/v1/following", &[("actor", actor)])
+            .await
+    }
+
+    pub async fn list_followers(&self, actor: &str) -> Result<Vec<FollowInfo>> {
+        self.get_with_query("/api/v1/followers", &[("actor", actor)])
+            .await
     }
 
     // --- Key operations ---

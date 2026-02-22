@@ -969,6 +969,8 @@ async fn process_incoming_activity(
         ActivityType::Delete => handle_delete_activity(activity, actor, state).await,
         ActivityType::Like => handle_like_activity(activity, actor, state).await,
         ActivityType::Announce => handle_announce_activity(activity, actor, state).await,
+        ActivityType::Accept => handle_accept_s2s_activity(activity, actor, state).await,
+        ActivityType::Reject => handle_reject_s2s_activity(activity, actor, state).await,
         _ => {
             warn!("Unhandled activity type: {:?}", activity.activity_type);
             Ok(())
@@ -1085,6 +1087,175 @@ async fn handle_follow_activity(
         .map_err(|e| format!("Failed to update follow status: {}", e))?;
 
     Ok(())
+}
+
+/// Handle incoming Accept activity from a remote server (S2S).
+///
+/// When we send a Follow to a remote actor and they accept it,
+/// they send an Accept activity back to our user's inbox.
+/// This handler extracts the original Follow from the Accept's object
+/// and updates the follow status to Accepted.
+async fn handle_accept_s2s_activity(
+    activity: &Activity,
+    local_actor: &ActorDocument,
+    state: &AppState,
+) -> Result<(), String> {
+    let (follower, following) = extract_follow_from_response(activity, local_actor, state).await?;
+
+    info!(
+        "Processing Accept: {} accepted follow from {}",
+        following, follower
+    );
+
+    state
+        .db_manager
+        .update_follow_status(&follower, &following, FollowStatus::Accepted)
+        .await
+        .map_err(|e| format!("Failed to update follow status to Accepted: {}", e))?;
+
+    info!(
+        "Follow status updated to Accepted for {} -> {}",
+        follower, following
+    );
+
+    Ok(())
+}
+
+/// Handle incoming Reject activity from a remote server (S2S).
+///
+/// When we send a Follow to a remote actor and they reject it,
+/// they send a Reject activity back to our user's inbox.
+async fn handle_reject_s2s_activity(
+    activity: &Activity,
+    local_actor: &ActorDocument,
+    state: &AppState,
+) -> Result<(), String> {
+    let (follower, following) = extract_follow_from_response(activity, local_actor, state).await?;
+
+    info!(
+        "Processing Reject: {} rejected follow from {}",
+        following, follower
+    );
+
+    state
+        .db_manager
+        .update_follow_status(&follower, &following, FollowStatus::Rejected)
+        .await
+        .map_err(|e| format!("Failed to update follow status to Rejected: {}", e))?;
+
+    info!(
+        "Follow status updated to Rejected for {} -> {}",
+        follower, following
+    );
+
+    Ok(())
+}
+
+/// Extract the follower and following actor IDs from an Accept/Reject activity.
+///
+/// The Accept/Reject object can be either:
+/// - An embedded Follow activity object with actor/object fields
+/// - A URL reference to the original Follow activity stored in our DB
+///
+/// Returns (follower, following) where follower is our local actor and
+/// following is the remote actor.
+async fn extract_follow_from_response(
+    activity: &Activity,
+    local_actor: &ActorDocument,
+    state: &AppState,
+) -> Result<(String, String), String> {
+    let object = activity
+        .object
+        .as_ref()
+        .ok_or("Accept/Reject activity missing object field")?;
+
+    match object {
+        oxifed::ObjectOrLink::Object(follow_obj) => {
+            // Embedded Follow activity - extract actor and object from it
+            let follow_actor = follow_obj
+                .additional_properties
+                .get("actor")
+                .and_then(|v| v.as_str())
+                .ok_or("Embedded Follow missing actor field")?;
+
+            let follow_target = follow_obj
+                .additional_properties
+                .get("object")
+                .and_then(|v| v.as_str())
+                .ok_or("Embedded Follow missing object field")?;
+
+            Ok((follow_actor.to_string(), follow_target.to_string()))
+        }
+        oxifed::ObjectOrLink::Url(follow_url) => {
+            // URL reference to the Follow activity - look it up in our DB
+            let follow_id = follow_url.as_str();
+            match state.db_manager.find_activity_by_id(follow_id).await {
+                Ok(Some(activity_doc)) => {
+                    let follower = activity_doc.actor;
+                    let following = activity_doc
+                        .object
+                        .ok_or("Stored Follow activity missing object")?;
+                    Ok((follower, following))
+                }
+                Ok(None) => {
+                    // Activity not found in our DB - fall back to using the local actor
+                    // as the follower and the Accept sender as the following target
+                    let following = activity
+                        .actor
+                        .as_ref()
+                        .and_then(|a| match a {
+                            oxifed::ObjectOrLink::Url(url) => Some(url.as_str().to_string()),
+                            _ => None,
+                        })
+                        .ok_or("Accept activity missing actor")?;
+
+                    warn!(
+                        "Follow activity {} not found in DB, inferring from Accept context",
+                        follow_id
+                    );
+                    Ok((local_actor.actor_id.clone(), following))
+                }
+                Err(e) => Err(format!(
+                    "Failed to look up Follow activity {}: {}",
+                    follow_id, e
+                )),
+            }
+        }
+        oxifed::ObjectOrLink::Link(link) => {
+            // Link object with href - similar to URL case
+            let follow_url = link.href.as_ref().ok_or("Link object missing href")?;
+            let follow_id = follow_url.as_str();
+            match state.db_manager.find_activity_by_id(follow_id).await {
+                Ok(Some(activity_doc)) => {
+                    let follower = activity_doc.actor;
+                    let following = activity_doc
+                        .object
+                        .ok_or("Stored Follow activity missing object")?;
+                    Ok((follower, following))
+                }
+                Ok(None) => {
+                    let following = activity
+                        .actor
+                        .as_ref()
+                        .and_then(|a| match a {
+                            oxifed::ObjectOrLink::Url(url) => Some(url.as_str().to_string()),
+                            _ => None,
+                        })
+                        .ok_or("Accept activity missing actor")?;
+
+                    warn!(
+                        "Follow activity {} not found in DB, inferring from Accept context",
+                        follow_id
+                    );
+                    Ok((local_actor.actor_id.clone(), following))
+                }
+                Err(e) => Err(format!(
+                    "Failed to look up Follow activity {}: {}",
+                    follow_id, e
+                )),
+            }
+        }
+    }
 }
 
 /// Handle Undo activity

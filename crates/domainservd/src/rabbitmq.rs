@@ -305,6 +305,17 @@ pub async fn init_rabbitmq(pool: &Pool) -> Result<(), RabbitMQError> {
         )
         .await?;
 
+    // Also bind follow requests to the same queue
+    channel
+        .queue_bind(
+            QUEUE_RPC_DOMAIN,
+            EXCHANGE_RPC_REQUEST,
+            "follow", // routing key for follow requests
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+
     info!("RabbitMQ exchanges and queues initialized successfully");
     Ok(())
 }
@@ -484,6 +495,10 @@ async fn process_message(data: &[u8], db: &Arc<MongoDB>) -> Result<(), RabbitMQE
             warn!("User RPC messages should be handled by RPC handler, not message processor");
             Ok(())
         }
+        MessageEnum::FollowRpcRequest(_) | MessageEnum::FollowRpcResponse(_) => {
+            warn!("Follow RPC messages should be handled by RPC handler, not message processor");
+            Ok(())
+        }
     }
 }
 
@@ -631,6 +646,7 @@ async fn process_rpc_message(
     enum RpcResponse {
         Domain(oxifed::messaging::DomainRpcResponse),
         User(oxifed::messaging::UserRpcResponse),
+        Follow(oxifed::messaging::FollowRpcResponse),
     }
 
     impl RpcResponse {
@@ -638,6 +654,7 @@ async fn process_rpc_message(
             match self {
                 RpcResponse::Domain(resp) => resp.to_message(),
                 RpcResponse::User(resp) => resp.to_message(),
+                RpcResponse::Follow(resp) => resp.to_message(),
             }
         }
     }
@@ -671,6 +688,21 @@ async fn process_rpc_message(
                 }
                 oxifed::messaging::UserRpcRequestType::GetUser { username } => {
                     handle_get_user_rpc(db, &req.request_id, &username).await
+                }
+            })
+        }
+        MessageEnum::FollowRpcRequest(req) => {
+            info!(
+                "Processing follow RPC request: {} (type: {:?})",
+                req.request_id, req.request_type
+            );
+
+            RpcResponse::Follow(match req.request_type {
+                oxifed::messaging::FollowRpcRequestType::ListFollowing { actor } => {
+                    handle_list_following_rpc(db, &req.request_id, &actor).await
+                }
+                oxifed::messaging::FollowRpcRequestType::ListFollowers { actor } => {
+                    handle_list_followers_rpc(db, &req.request_id, &actor).await
                 }
             })
         }
@@ -2314,6 +2346,74 @@ async fn handle_get_user_rpc(
             oxifed::messaging::UserRpcResponse::error(
                 request_id.to_string(),
                 format!("Failed to get user '{}': {}", username, e),
+            )
+        }
+    }
+}
+
+/// Handle list following RPC request
+async fn handle_list_following_rpc(
+    db: &Arc<MongoDB>,
+    request_id: &str,
+    actor: &str,
+) -> oxifed::messaging::FollowRpcResponse {
+    let db_manager = oxifed::database::DatabaseManager::new(db.database().clone());
+
+    match db_manager.get_actor_following_all(actor).await {
+        Ok(follow_docs) => {
+            let follows = follow_docs
+                .into_iter()
+                .map(|doc| oxifed::messaging::FollowInfo {
+                    follower: doc.follower,
+                    following: doc.following,
+                    status: format!("{:?}", doc.status).to_lowercase(),
+                    activity_id: doc.activity_id,
+                    created_at: doc.created_at.to_rfc3339(),
+                    responded_at: doc.responded_at.map(|dt| dt.to_rfc3339()),
+                })
+                .collect();
+
+            oxifed::messaging::FollowRpcResponse::follow_list(request_id.to_string(), follows)
+        }
+        Err(e) => {
+            error!("Failed to list following for '{}': {}", actor, e);
+            oxifed::messaging::FollowRpcResponse::error(
+                request_id.to_string(),
+                format!("Failed to list following: {}", e),
+            )
+        }
+    }
+}
+
+/// Handle list followers RPC request
+async fn handle_list_followers_rpc(
+    db: &Arc<MongoDB>,
+    request_id: &str,
+    actor: &str,
+) -> oxifed::messaging::FollowRpcResponse {
+    let db_manager = oxifed::database::DatabaseManager::new(db.database().clone());
+
+    match db_manager.get_actor_followers_all(actor).await {
+        Ok(follow_docs) => {
+            let follows = follow_docs
+                .into_iter()
+                .map(|doc| oxifed::messaging::FollowInfo {
+                    follower: doc.follower,
+                    following: doc.following,
+                    status: format!("{:?}", doc.status).to_lowercase(),
+                    activity_id: doc.activity_id,
+                    created_at: doc.created_at.to_rfc3339(),
+                    responded_at: doc.responded_at.map(|dt| dt.to_rfc3339()),
+                })
+                .collect();
+
+            oxifed::messaging::FollowRpcResponse::follow_list(request_id.to_string(), follows)
+        }
+        Err(e) => {
+            error!("Failed to list followers for '{}': {}", actor, e);
+            oxifed::messaging::FollowRpcResponse::error(
+                request_id.to_string(),
+                format!("Failed to list followers: {}", e),
             )
         }
     }

@@ -922,6 +922,38 @@ impl DatabaseManager {
         Ok(following)
     }
 
+    /// Get all follow documents where actor is the follower (all statuses)
+    pub async fn get_actor_following_all(
+        &self,
+        actor_id: &str,
+    ) -> Result<Vec<FollowDocument>, DatabaseError> {
+        let collection: Collection<FollowDocument> = self.database.collection("follows");
+        let mut cursor = collection.find(doc! { "follower": actor_id }).await?;
+
+        let mut follows = Vec::new();
+        while cursor.advance().await? {
+            follows.push(cursor.deserialize_current()?);
+        }
+
+        Ok(follows)
+    }
+
+    /// Get all follow documents where actor is being followed (all statuses)
+    pub async fn get_actor_followers_all(
+        &self,
+        actor_id: &str,
+    ) -> Result<Vec<FollowDocument>, DatabaseError> {
+        let collection: Collection<FollowDocument> = self.database.collection("follows");
+        let mut cursor = collection.find(doc! { "following": actor_id }).await?;
+
+        let mut follows = Vec::new();
+        while cursor.advance().await? {
+            follows.push(cursor.deserialize_current()?);
+        }
+
+        Ok(follows)
+    }
+
     /// Update an object
     pub async fn update_object(
         &self,

@@ -37,6 +37,9 @@ pub fn api_router() -> Router<AppState> {
         .route("/api/v1/activities/follow", post(activities::follow))
         .route("/api/v1/activities/like", post(activities::like))
         .route("/api/v1/activities/announce", post(activities::announce))
+        // Follow relationships
+        .route("/api/v1/following", get(activities::list_following))
+        .route("/api/v1/followers", get(activities::list_followers))
         // Keys
         .route("/api/v1/keys/generate", post(keys::generate_key))
 }

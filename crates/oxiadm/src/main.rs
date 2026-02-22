@@ -228,6 +228,20 @@ enum ActivityCommands {
         actor: Option<String>,
     },
 
+    /// List accounts the actor is following and their status
+    Following {
+        /// Actor to query (overrides context, format: user@domain or full URL)
+        #[arg(long)]
+        actor: Option<String>,
+    },
+
+    /// List followers of the actor and their status
+    Followers {
+        /// Actor to query (overrides context, format: user@domain or full URL)
+        #[arg(long)]
+        actor: Option<String>,
+    },
+
     /// Create a "Like" activity
     Like {
         /// Object to like (user@domain or full URL)
@@ -920,6 +934,52 @@ async fn handle_activity_command(
                 "'Like' activity from '{}' for '{}' sent",
                 resolved_actor, resolved_object
             );
+        }
+
+        ActivityCommands::Following { actor } => {
+            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
+
+            let follows = client.list_following(&resolved_actor).await?;
+            if follows.is_empty() {
+                println!("{} is not following anyone", resolved_actor);
+            } else {
+                println!("Following ({}):", follows.len());
+                for f in &follows {
+                    let status_indicator = match f.status.as_str() {
+                        "accepted" => "[accepted]",
+                        "pending" => "[pending] ",
+                        "rejected" => "[rejected]",
+                        _ => &f.status,
+                    };
+                    println!(
+                        "  {} {} (since {})",
+                        status_indicator, f.following, f.created_at
+                    );
+                }
+            }
+        }
+
+        ActivityCommands::Followers { actor } => {
+            let resolved_actor = resolve::resolve_actor(actor.as_deref()).await?;
+
+            let follows = client.list_followers(&resolved_actor).await?;
+            if follows.is_empty() {
+                println!("{} has no followers", resolved_actor);
+            } else {
+                println!("Followers ({}):", follows.len());
+                for f in &follows {
+                    let status_indicator = match f.status.as_str() {
+                        "accepted" => "[accepted]",
+                        "pending" => "[pending] ",
+                        "rejected" => "[rejected]",
+                        _ => &f.status,
+                    };
+                    println!(
+                        "  {} {} (since {})",
+                        status_indicator, f.follower, f.created_at
+                    );
+                }
+            }
         }
 
         ActivityCommands::Announce {
