@@ -1730,11 +1730,34 @@ async fn publish_activity_document_to_exchange(
 }
 
 async fn delete_person_object(
-    _db: &Arc<MongoDB>,
+    db: &Arc<MongoDB>,
     msg: &ProfileDeleteMessage,
 ) -> Result<(), RabbitMQError> {
-    // Just a stub for now, will implement later
     info!("Delete person request received for ID: {}", msg.id);
+
+    let (username, domain) = split_subject(&msg.id)?;
+    let actor_id = format!("https://{}/users/{}", domain, username);
+
+    // Delete actor and all related data (objects, activities, keys, follows)
+    db.manager()
+        .delete_actor(&actor_id)
+        .await
+        .map_err(|e| RabbitMQError::DbError(crate::db::DbError::DatabaseError(e)))?;
+    info!("Deleted actor and related data for: {}", actor_id);
+
+    // Delete WebFinger profile
+    let jrd_profiles = db.webfinger_profiles_collection();
+    let subject = format!("acct:{}@{}", username, domain);
+    jrd_profiles
+        .delete_one(mongodb::bson::doc! { "subject": &subject })
+        .await
+        .map_err(|e| {
+            RabbitMQError::DbError(crate::db::DbError::DatabaseError(
+                oxifed::database::DatabaseError::MongoError(e),
+            ))
+        })?;
+    info!("Deleted WebFinger profile for: {}", subject);
+
     Ok(())
 }
 
