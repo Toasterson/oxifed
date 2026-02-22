@@ -17,6 +17,7 @@ pub struct OidcConfig {
     pub issuer_url: String,
     pub audience: String,
     pub jwks_uri: String,
+    pub userinfo_endpoint: String,
 }
 
 /// Cached JWKS keys
@@ -40,8 +41,14 @@ impl JwksCache {
     }
 }
 
-/// Discover OIDC metadata and extract jwks_uri
-pub async fn discover_oidc(issuer_url: &str) -> Result<String, ApiError> {
+/// Discovered OIDC endpoints
+pub struct OidcEndpoints {
+    pub jwks_uri: String,
+    pub userinfo_endpoint: String,
+}
+
+/// Discover OIDC metadata and extract endpoints
+pub async fn discover_oidc(issuer_url: &str) -> Result<OidcEndpoints, ApiError> {
     let well_known = format!(
         "{}/.well-known/openid-configuration",
         issuer_url.trim_end_matches('/')
@@ -59,10 +66,20 @@ pub async fn discover_oidc(issuer_url: &str) -> Result<String, ApiError> {
         .await
         .map_err(|e| ApiError::OidcError(format!("Failed to parse OIDC metadata: {}", e)))?;
 
-    metadata["jwks_uri"]
+    let jwks_uri = metadata["jwks_uri"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| ApiError::OidcError("OIDC metadata missing jwks_uri".into()))
+        .ok_or_else(|| ApiError::OidcError("OIDC metadata missing jwks_uri".into()))?;
+
+    let userinfo_endpoint = metadata["userinfo_endpoint"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| ApiError::OidcError("OIDC metadata missing userinfo_endpoint".into()))?;
+
+    Ok(OidcEndpoints {
+        jwks_uri,
+        userinfo_endpoint,
+    })
 }
 
 /// Fetch JWKS from the provider and populate the cache
@@ -126,6 +143,41 @@ pub struct AuthenticatedUser {
     pub sub: String,
 }
 
+/// Userinfo response (subset of fields we need)
+#[derive(Deserialize)]
+struct UserinfoResponse {
+    sub: String,
+}
+
+/// Validate an opaque token by calling the OIDC userinfo endpoint.
+async fn validate_opaque_token(
+    userinfo_endpoint: &str,
+    token: &str,
+) -> Result<AuthenticatedUser, ApiError> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(userinfo_endpoint)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| {
+            ApiError::InvalidToken(format!("Userinfo request failed: {}", e))
+        })?;
+
+    if !response.status().is_success() {
+        return Err(ApiError::InvalidToken(format!(
+            "Userinfo returned status {}",
+            response.status()
+        )));
+    }
+
+    let info: UserinfoResponse = response.json().await.map_err(|e| {
+        ApiError::InvalidToken(format!("Failed to parse userinfo response: {}", e))
+    })?;
+
+    Ok(AuthenticatedUser { sub: info.sub })
+}
+
 impl FromRequestParts<AppState> for AuthenticatedUser {
     type Rejection = ApiError;
 
@@ -144,58 +196,71 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
             .strip_prefix("Bearer ")
             .ok_or(ApiError::InvalidToken("Expected Bearer token".to_string()))?;
 
-        // Decode header to get kid
-        let header = decode_header(token)
-            .map_err(|e| ApiError::InvalidToken(format!("Invalid token header: {}", e)))?;
-
-        let kid = header
-            .kid
-            .ok_or(ApiError::InvalidToken("Token missing kid".to_string()))?;
-
-        // Try to get the decoding key, refreshing cache if needed
-        let decoding_key = {
-            let cache = state.jwks_cache.read().await;
-            cache.keys.get(&kid).cloned()
-        };
-
-        let decoding_key = match decoding_key {
-            Some(key) => key,
-            None => {
-                // Key not found — refresh JWKS cache
-                fetch_jwks(&state.jwks_cache).await?;
-                let cache = state.jwks_cache.read().await;
-                cache
-                    .keys
-                    .get(&kid)
-                    .cloned()
-                    .ok_or(ApiError::InvalidToken(format!(
-                        "Unknown signing key: {}",
-                        kid
-                    )))?
-            }
-        };
-
-        // Also refresh if stale
-        {
-            let cache = state.jwks_cache.read().await;
-            if cache.is_stale() {
-                drop(cache);
-                let _ = fetch_jwks(&state.jwks_cache).await;
+        // Try JWT validation first; fall back to userinfo for opaque tokens
+        match validate_jwt(token, state).await {
+            Ok(user) => Ok(user),
+            Err(_jwt_err) => {
+                // Token is not a valid JWT — try opaque token via userinfo
+                tracing::debug!("JWT validation failed, trying userinfo introspection");
+                validate_opaque_token(&state.oidc_config.userinfo_endpoint, token).await
             }
         }
-
-        // Validate the token
-        let mut validation = Validation::new(Algorithm::RS256);
-        validation.set_issuer(&[&state.oidc_config.issuer_url]);
-        validation.set_audience(&[&state.oidc_config.audience]);
-        validation.set_required_spec_claims(&["exp", "sub", "iss", "aud"]);
-        validation.leeway = 60;
-
-        let token_data = decode::<Claims>(token, &decoding_key, &validation)
-            .map_err(|e| ApiError::InvalidToken(format!("Token validation failed: {}", e)))?;
-
-        Ok(AuthenticatedUser {
-            sub: token_data.claims.sub,
-        })
     }
+}
+
+/// Validate a JWT token using cached JWKS keys.
+async fn validate_jwt(token: &str, state: &AppState) -> Result<AuthenticatedUser, ApiError> {
+    // Decode header to get kid
+    let header = decode_header(token)
+        .map_err(|e| ApiError::InvalidToken(format!("Invalid token header: {}", e)))?;
+
+    let kid = header
+        .kid
+        .ok_or(ApiError::InvalidToken("Token missing kid".to_string()))?;
+
+    // Try to get the decoding key, refreshing cache if needed
+    let decoding_key = {
+        let cache = state.jwks_cache.read().await;
+        cache.keys.get(&kid).cloned()
+    };
+
+    let decoding_key = match decoding_key {
+        Some(key) => key,
+        None => {
+            // Key not found — refresh JWKS cache
+            fetch_jwks(&state.jwks_cache).await?;
+            let cache = state.jwks_cache.read().await;
+            cache
+                .keys
+                .get(&kid)
+                .cloned()
+                .ok_or(ApiError::InvalidToken(format!(
+                    "Unknown signing key: {}",
+                    kid
+                )))?
+        }
+    };
+
+    // Also refresh if stale
+    {
+        let cache = state.jwks_cache.read().await;
+        if cache.is_stale() {
+            drop(cache);
+            let _ = fetch_jwks(&state.jwks_cache).await;
+        }
+    }
+
+    // Validate the token
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_issuer(&[&state.oidc_config.issuer_url]);
+    validation.set_audience(&[&state.oidc_config.audience]);
+    validation.set_required_spec_claims(&["exp", "sub", "iss", "aud"]);
+    validation.leeway = 60;
+
+    let token_data = decode::<Claims>(token, &decoding_key, &validation)
+        .map_err(|e| ApiError::InvalidToken(format!("Token validation failed: {}", e)))?;
+
+    Ok(AuthenticatedUser {
+        sub: token_data.claims.sub,
+    })
 }

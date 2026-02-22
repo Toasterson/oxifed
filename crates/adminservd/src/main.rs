@@ -56,17 +56,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Discover OIDC provider metadata
     tracing::info!("Discovering OIDC metadata from {}", oidc_issuer_url);
-    let jwks_uri = auth::discover_oidc(&oidc_issuer_url).await?;
-    tracing::info!("JWKS URI: {}", jwks_uri);
+    let endpoints = auth::discover_oidc(&oidc_issuer_url).await?;
+    tracing::info!("JWKS URI: {}", endpoints.jwks_uri);
+    tracing::info!("Userinfo endpoint: {}", endpoints.userinfo_endpoint);
 
     let oidc_config = OidcConfig {
         issuer_url: oidc_issuer_url,
         audience: oidc_audience,
-        jwks_uri: jwks_uri.clone(),
+        jwks_uri: endpoints.jwks_uri.clone(),
+        userinfo_endpoint: endpoints.userinfo_endpoint,
     };
 
     // Fetch initial JWKS
-    let jwks_cache = Arc::new(RwLock::new(JwksCache::new(jwks_uri)));
+    let jwks_cache = Arc::new(RwLock::new(JwksCache::new(endpoints.jwks_uri)));
     auth::fetch_jwks(&jwks_cache).await?;
     tracing::info!("JWKS cache populated");
 
