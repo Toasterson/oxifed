@@ -19,7 +19,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "adminservd"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "axum",
  "deadpool-lapin",
@@ -1119,7 +1119,7 @@ checksum = "780955b8b195a21ab8e4ac6b60dd1dbdcec1dc6c51c0617964b08c81785e12c9"
 
 [[package]]
 name = "domainservd"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "axum",
  "chrono",
@@ -2766,7 +2766,7 @@ checksum = "9c6901729fa79e91a0913333229e9ca5dc725089d1c363b2f4b4760709dc4a52"
 
 [[package]]
 name = "oxiadm"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "chrono",
  "clap",
@@ -2786,7 +2786,7 @@ dependencies = [
 
 [[package]]
 name = "oxifed"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "axum",
  "base64",
@@ -2812,7 +2812,7 @@ dependencies = [
 
 [[package]]
 name = "oxifed-operator"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "chrono",
  "futures",
@@ -3133,7 +3133,7 @@ dependencies = [
 
 [[package]]
 name = "publisherd"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "base64",
  "futures",
