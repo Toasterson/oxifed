@@ -124,7 +124,10 @@ async fn run_device_code_flow(
     })?;
 
     // Request device authorization — with or without client_id
-    let mut form_params = vec![("scope", "openid profile offline_access"), ("client_name", "oxiadm")];
+    let mut form_params = vec![
+        ("scope", "openid profile offline_access"),
+        ("client_name", "oxiadm"),
+    ];
     if let Some(id) = client_id {
         form_params.push(("client_id", id));
     }
