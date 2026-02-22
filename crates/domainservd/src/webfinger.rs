@@ -12,10 +12,11 @@ use axum::{
     routing::get,
 };
 use mongodb::bson::doc;
-use oxifed::webfinger::JrdResource;
+use oxifed::webfinger::{JrdResource, Link};
 use serde::Deserialize;
 use thiserror::Error;
 use tracing::debug;
+use url::Url;
 
 use crate::AppState;
 
@@ -78,6 +79,25 @@ async fn handle_webfinger(
         )));
     }
 
+    // Check if this is a domain-level query (e.g. resource=https://oxifed.io)
+    if query.resource.starts_with("https://") {
+        if let Ok(url) = Url::parse(&query.resource) {
+            let is_domain_query = url.path() == "/" || url.path().is_empty();
+            if is_domain_query {
+                if let Some(hostname) = url.host_str() {
+                    // Check if this hostname is a registered domain
+                    if let Ok(Some(_)) = state.db_manager.find_domain_by_name(hostname).await {
+                        return Ok(Json(build_domain_jrd(
+                            &query.resource,
+                            &state,
+                            &query.relations,
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
     // Use the full resource as the subject for lookup
     let subject = query.resource.replace("act:", "acct:").clone();
 
@@ -108,6 +128,49 @@ async fn handle_webfinger(
     }
 
     Ok(Json(jrd))
+}
+
+/// Build a synthetic JRD for a domain-level WebFinger query.
+///
+/// Advertises the admin API URL and OIDC issuer when configured.
+fn build_domain_jrd(
+    resource: &str,
+    state: &AppState,
+    relations: &Option<Vec<String>>,
+) -> JrdResource {
+    let mut links = Vec::new();
+
+    if let Some(ref admin_url) = state.admin_api_url {
+        links.push(Link {
+            rel: "https://oxifed.io/ns/admin-api".to_string(),
+            href: Some(admin_url.clone()),
+            type_: None,
+            titles: None,
+            properties: None,
+        });
+    }
+
+    if let Some(ref issuer_url) = state.oidc_issuer_url {
+        links.push(Link {
+            rel: "http://openid.net/specs/connect/1.0/issuer".to_string(),
+            href: Some(issuer_url.clone()),
+            type_: None,
+            titles: None,
+            properties: None,
+        });
+    }
+
+    // Filter by requested relations if specified
+    if let Some(rels) = relations {
+        links.retain(|link| rels.contains(&link.rel));
+    }
+
+    JrdResource {
+        subject: Some(resource.to_string()),
+        aliases: None,
+        properties: None,
+        links: Some(links),
+    }
 }
 
 /// Creates a router for webfinger endpoints

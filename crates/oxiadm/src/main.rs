@@ -12,9 +12,9 @@ use miette::{Context, IntoDiagnostic, Result};
 #[command(name = "oxiadm")]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// Admin API URL
-    #[arg(long, env = "OXIADM_API_URL", default_value = "http://localhost:8081")]
-    api_url: String,
+    /// Admin API URL (overrides server context)
+    #[arg(long, env = "OXIADM_API_URL")]
+    api_url: Option<String>,
 
     #[command(subcommand)]
     command: Commands,
@@ -82,7 +82,7 @@ enum Commands {
         command: UserCommands,
     },
 
-    /// Manage the current actor context
+    /// Manage the current server/actor context
     Context {
         #[command(subcommand)]
         command: ContextCommands,
@@ -90,17 +90,27 @@ enum Commands {
 
     /// Authenticate with the admin API using OIDC Device Code Grant
     Login {
-        /// OIDC issuer URL (e.g. https://id.example.com)
+        /// OIDC issuer URL (overrides the server's stored issuer)
         #[arg(long, env = "OIDC_ISSUER_URL")]
-        issuer_url: String,
+        issuer_url: Option<String>,
 
         /// OIDC client ID (omit to use provider auto-registration)
         #[arg(long)]
         client_id: Option<String>,
     },
 
-    /// Clear stored authentication tokens
+    /// Clear stored authentication tokens for the current server
     Logout,
+
+    /// Add a server via WebFinger discovery and authenticate
+    AddServer {
+        /// Server hostname (e.g. oxifed.io)
+        hostname: String,
+
+        /// OIDC client ID (omit to use provider auto-registration)
+        #[arg(long)]
+        client_id: Option<String>,
+    },
 }
 
 /// Commands for working with Person actors
@@ -655,19 +665,22 @@ enum UserCommands {
     },
 }
 
-/// Commands for managing the actor context
+/// Commands for managing the server/actor context
 #[derive(Subcommand)]
 enum ContextCommands {
-    /// Set the current actor identity (e.g. user@domain)
+    /// Set the current server and/or actor
+    ///
+    /// Pass a hostname (e.g. "oxifed.io") to set the server,
+    /// or a user@domain (e.g. "toasterson@oxifed.io") to set both server and actor.
     Set {
-        /// Actor identifier (user@domain or full URL)
-        actor: String,
+        /// Server hostname or actor identifier (user@domain)
+        identity: String,
     },
 
-    /// Show the current actor context
+    /// Show the current context (server, auth status, actor)
     Show,
 
-    /// Clear the current actor context
+    /// Clear the current context
     Clear,
 }
 
@@ -678,23 +691,107 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Handle commands that don't need network
+    // Handle commands that don't need network / API client
     match &cli.command {
         Commands::Context { command } => return handle_context_command(command),
         Commands::Login {
             issuer_url,
             client_id,
-        } => return auth::device_code_login(issuer_url, client_id.as_deref()).await,
+        } => return auth::device_code_login(issuer_url.as_deref(), client_id.as_deref()).await,
         Commands::Logout => return auth::logout(),
+        Commands::AddServer {
+            hostname,
+            client_id,
+        } => return handle_add_server(hostname, client_id.as_deref()).await,
         _ => {}
     }
+
+    // Resolve the API URL: explicit --api-url > env > context
+    let api_url = match cli.api_url {
+        Some(url) => url,
+        None => context::get_admin_api_url()?,
+    };
 
     // Refresh token if needed, then create API client
     auth::refresh_token_if_needed().await?;
     let access_token = context::get_access_token()?;
-    let api_client = AdminApiClient::new(&cli.api_url, access_token).await?;
+    let api_client = AdminApiClient::new(&api_url, access_token).await?;
 
     handle_command(&api_client, &cli.command).await?;
+
+    Ok(())
+}
+
+/// Handle the `add-server` command: WebFinger discovery + OIDC login
+async fn handle_add_server(hostname: &str, client_id: Option<&str>) -> Result<()> {
+    use oxifed::webfinger::WebFingerClient;
+
+    println!("Discovering server configuration for '{}'...", hostname);
+
+    let wf_client = WebFingerClient::new();
+    let resource = format!("https://{}", hostname);
+    let jrd = wf_client
+        .finger(&resource, None)
+        .await
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "WebFinger discovery failed for '{}'. Is the server running and reachable?",
+                hostname
+            )
+        })?;
+
+    // Extract admin API URL
+    let admin_api_url = jrd
+        .find_link("https://oxifed.io/ns/admin-api")
+        .and_then(|link| link.href.as_ref())
+        .ok_or_else(|| {
+            miette::miette!(
+                help = format!(
+                    "The server at '{}' did not advertise an admin API endpoint. \
+                     Ensure domainservd is configured with ADMIN_API_URL.",
+                    hostname
+                ),
+                "No admin-api link found in WebFinger response for '{}'",
+                hostname
+            )
+        })?
+        .clone();
+
+    // Extract OIDC issuer URL
+    let issuer_url = jrd
+        .find_link("http://openid.net/specs/connect/1.0/issuer")
+        .and_then(|link| link.href.as_ref())
+        .ok_or_else(|| {
+            miette::miette!(
+                help = format!(
+                    "The server at '{}' did not advertise an OIDC issuer. \
+                     Ensure domainservd is configured with OIDC_ISSUER_URL.",
+                    hostname
+                ),
+                "No OIDC issuer link found in WebFinger response for '{}'",
+                hostname
+            )
+        })?
+        .clone();
+
+    println!("  Admin API: {}", admin_api_url);
+    println!("  OIDC Issuer: {}", issuer_url);
+    println!();
+
+    // Perform OIDC device code login
+    auth::device_code_login_for_server(hostname, &admin_api_url, &issuer_url, client_id).await?;
+
+    println!();
+    println!("Server '{}' added and set as current.", hostname);
+    println!(
+        "Hint: create a person with: oxiadm person create user@{}",
+        hostname
+    );
+    println!(
+        "      then set actor with: oxiadm context set user@{}",
+        hostname
+    );
 
     Ok(())
 }
@@ -702,24 +799,114 @@ async fn main() -> Result<()> {
 /// Handle context commands (no network needed)
 fn handle_context_command(command: &ContextCommands) -> Result<()> {
     match command {
-        ContextCommands::Set { actor } => {
+        ContextCommands::Set { identity } => {
             let mut ctx = context::load_context()?;
-            ctx.context.actor = Some(actor.clone());
-            context::save_context(&ctx)?;
-            println!("Actor context set to: {}", actor);
+
+            if identity.contains('@') {
+                // user@domain format: set both server and actor
+                let domain = identity
+                    .split('@')
+                    .nth(1)
+                    .ok_or_else(|| miette::miette!("Invalid identity format: {}", identity))?;
+
+                // Validate the server exists
+                if ctx.find_server(domain).is_none() {
+                    return Err(miette::miette!(
+                        help = format!("Add the server first with: oxiadm add-server {}", domain),
+                        "Server '{}' is not configured",
+                        domain
+                    ));
+                }
+
+                ctx.context.current_server = Some(domain.to_string());
+                ctx.context.actor = Some(identity.clone());
+                context::save_context(&ctx)?;
+                println!("Server set to: {}", domain);
+                println!("Actor set to: {}", identity);
+            } else {
+                // hostname only: set server, clear actor
+                if ctx.find_server(identity).is_none() {
+                    return Err(miette::miette!(
+                        help = format!("Add the server first with: oxiadm add-server {}", identity),
+                        "Server '{}' is not configured",
+                        identity
+                    ));
+                }
+
+                ctx.context.current_server = Some(identity.clone());
+                ctx.context.actor = None;
+                context::save_context(&ctx)?;
+                println!("Server set to: {}", identity);
+                println!(
+                    "Actor cleared (set with: oxiadm context set user@{})",
+                    identity
+                );
+            }
         }
         ContextCommands::Show => {
             let ctx = context::load_context()?;
-            match ctx.context.actor {
-                Some(actor) => println!("{}", actor),
-                None => println!("No actor context set. Use: oxiadm context set user@domain"),
+
+            // Current server
+            match &ctx.context.current_server {
+                Some(server) => {
+                    println!("Current server: {}", server);
+                    if let Some(s) = ctx.find_server(server) {
+                        println!("  Admin API: {}", s.admin_api_url);
+                        if let Some(ref issuer) = s.issuer_url {
+                            println!("  OIDC Issuer: {}", issuer);
+                        }
+                        if s.access_token.is_some() {
+                            let status = if let Some(ref expires_at) = s.expires_at {
+                                match chrono::DateTime::parse_from_rfc3339(expires_at) {
+                                    Ok(expiry) if chrono::Utc::now() < expiry => {
+                                        format!("authenticated (expires {})", expires_at)
+                                    }
+                                    _ => "token expired".to_string(),
+                                }
+                            } else {
+                                "authenticated".to_string()
+                            };
+                            println!("  Auth: {}", status);
+                        } else {
+                            println!("  Auth: not logged in");
+                        }
+                    }
+                }
+                None => println!("No server selected"),
+            }
+
+            // Current actor
+            match &ctx.context.actor {
+                Some(actor) => println!("Current actor: {}", actor),
+                None => println!("No actor set"),
+            }
+
+            // List all configured servers
+            if !ctx.servers.is_empty() {
+                println!();
+                println!("Configured servers:");
+                for s in &ctx.servers {
+                    let current = ctx
+                        .context
+                        .current_server
+                        .as_ref()
+                        .is_some_and(|cs| cs == &s.hostname);
+                    let marker = if current { " *" } else { "" };
+                    let auth = if s.access_token.is_some() {
+                        "logged in"
+                    } else {
+                        "no auth"
+                    };
+                    println!("  {}{} ({})", s.hostname, marker, auth);
+                }
             }
         }
         ContextCommands::Clear => {
             let mut ctx = context::load_context()?;
             ctx.context.actor = None;
+            ctx.context.current_server = None;
             context::save_context(&ctx)?;
-            println!("Actor context cleared");
+            println!("Context cleared (server and actor)");
         }
     }
     Ok(())
@@ -755,7 +942,10 @@ async fn handle_command(client: &AdminApiClient, command: &Commands) -> Result<(
         Commands::User { command } => {
             handle_user_command(client, command).await?;
         }
-        Commands::Context { .. } | Commands::Login { .. } | Commands::Logout => {
+        Commands::Context { .. }
+        | Commands::Login { .. }
+        | Commands::Logout
+        | Commands::AddServer { .. } => {
             unreachable!("Handled before API client creation");
         }
     }

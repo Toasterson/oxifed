@@ -33,6 +33,10 @@ pub struct AppState {
     pub db_manager: Arc<DatabaseManager>,
     /// PKI manager for cryptographic operations
     pub pki_manager: Arc<PkiManager>,
+    /// Admin API URL advertised via domain-level WebFinger
+    pub admin_api_url: Option<String>,
+    /// OIDC issuer URL advertised via domain-level WebFinger
+    pub oidc_issuer_url: Option<String>,
 }
 
 /// Errors that can occur in the domainservd service
@@ -117,12 +121,18 @@ async fn main() -> Result<(), DomainservdError> {
     // Create PKI manager (in a real implementation, this would load existing keys)
     let pki_manager = Arc::new(PkiManager::new());
 
+    // Read optional discovery URLs for domain-level WebFinger
+    let admin_api_url = std::env::var("ADMIN_API_URL").ok();
+    let oidc_issuer_url = std::env::var("OIDC_ISSUER_URL").ok();
+
     // Create an application state
     let app_state = AppState {
         db: db.clone(),
         mq_pool: mq_pool.clone(),
         db_manager: db_manager.clone(),
         pki_manager: pki_manager.clone(),
+        admin_api_url,
+        oidc_issuer_url,
     };
 
     // Start message consumer in a separate task

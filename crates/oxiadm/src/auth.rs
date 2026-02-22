@@ -8,7 +8,7 @@ use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use crate::context::{self, AuthContext};
+use crate::context::{self, ServerConfig};
 
 /// OIDC discovery document (subset of fields we need)
 #[derive(Deserialize)]
@@ -101,12 +101,14 @@ async fn discover_metadata(client: &reqwest::Client, issuer_url: &str) -> Result
         .map_err(|e| miette!("Failed to parse OIDC metadata: {}", e))
 }
 
-/// Perform Device Code Grant login flow
+/// Run the Device Code Grant flow and return the resulting auth fields.
 ///
-/// If `client_id` is `None`, the provider's auto-registration is used:
-/// the device authorization request is sent without a `client_id`, and the
-/// provider returns auto-registered `client_id`/`client_secret` in the response.
-pub async fn device_code_login(issuer_url: &str, client_id: Option<&str>) -> Result<()> {
+/// This is the core flow used by both `device_code_login` (for the current server)
+/// and `device_code_login_for_server` (for add-server).
+async fn run_device_code_flow(
+    issuer_url: &str,
+    client_id: Option<&str>,
+) -> Result<(TokenResponse, String, Option<String>)> {
     let client = reqwest::Client::new();
 
     // Discover OIDC endpoints
@@ -145,8 +147,7 @@ pub async fn device_code_login(issuer_url: &str, client_id: Option<&str>) -> Res
         .into_diagnostic()
         .map_err(|e| miette!("Failed to parse device authorization response: {}", e))?;
 
-    // Resolve the client_id to use for token polling:
-    // either the one we sent, or the auto-registered one from the response
+    // Resolve the client_id to use for token polling
     let effective_client_id = match client_id {
         Some(id) => id.to_string(),
         None => device_auth.client_id.clone().ok_or_else(|| {
@@ -177,7 +178,7 @@ pub async fn device_code_login(issuer_url: &str, client_id: Option<&str>) -> Res
 
         if tokio::time::Instant::now() > deadline {
             return Err(miette!(
-                help = "Try again with: oxiadm login --issuer-url <URL>",
+                help = "Try again",
                 "Device authorization timed out"
             ));
         }
@@ -214,13 +215,12 @@ pub async fn device_code_login(issuer_url: &str, client_id: Option<&str>) -> Res
             match error.error.as_str() {
                 "authorization_pending" => continue,
                 "slow_down" => {
-                    // Back off
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     continue;
                 }
                 "expired_token" => {
                     return Err(miette!(
-                        help = "Try again with: oxiadm login --issuer-url <URL>",
+                        help = "Try again",
                         "Device code expired before authorization was completed"
                     ));
                 }
@@ -241,42 +241,112 @@ pub async fn device_code_login(issuer_url: &str, client_id: Option<&str>) -> Res
         }
     };
 
-    // Calculate expiry
+    Ok((
+        token_response,
+        effective_client_id,
+        device_auth.client_secret,
+    ))
+}
+
+/// Perform Device Code Grant login for the current server.
+pub async fn device_code_login(issuer_url: Option<&str>, client_id: Option<&str>) -> Result<()> {
+    let mut ctx = context::load_context()?;
+    let server = ctx.current_server_mut()?;
+
+    let effective_issuer = match issuer_url {
+        Some(url) => url.to_string(),
+        None => server.issuer_url.clone().ok_or_else(|| {
+            miette!(
+                help = "Provide --issuer-url or add the server with: oxiadm add-server <hostname>",
+                "No OIDC issuer URL configured for server '{}'",
+                server.hostname
+            )
+        })?,
+    };
+
+    let (token_response, effective_client_id, auto_client_secret) =
+        run_device_code_flow(&effective_issuer, client_id).await?;
+
     let expires_at = token_response.expires_in.map(|secs| {
         let expiry = Utc::now() + chrono::Duration::seconds(secs as i64);
         expiry.to_rfc3339()
     });
 
-    // Save tokens to context
+    // Re-load to avoid stale data
     let mut ctx = context::load_context()?;
-    ctx.auth = AuthContext {
-        issuer_url: Some(issuer_url.to_string()),
-        client_id: Some(effective_client_id),
-        client_secret: device_auth.client_secret,
-        access_token: Some(token_response.access_token),
-        refresh_token: token_response.refresh_token,
-        expires_at,
-    };
+    let server = ctx.current_server_mut()?;
+    server.issuer_url = Some(effective_issuer);
+    server.client_id = Some(effective_client_id);
+    server.client_secret = auto_client_secret;
+    server.access_token = Some(token_response.access_token);
+    server.refresh_token = token_response.refresh_token;
+    server.expires_at = expires_at;
     context::save_context(&ctx)?;
 
     println!("Login successful!");
     Ok(())
 }
 
-/// Refresh the access token if it's expired or about to expire
+/// Perform Device Code Grant login for a specific server (used by `add-server`).
+///
+/// Creates or updates the server entry in context and sets it as current.
+pub async fn device_code_login_for_server(
+    hostname: &str,
+    admin_api_url: &str,
+    issuer_url: &str,
+    client_id: Option<&str>,
+) -> Result<()> {
+    let (token_response, effective_client_id, auto_client_secret) =
+        run_device_code_flow(issuer_url, client_id).await?;
+
+    let expires_at = token_response.expires_in.map(|secs| {
+        let expiry = Utc::now() + chrono::Duration::seconds(secs as i64);
+        expiry.to_rfc3339()
+    });
+
+    let mut ctx = context::load_context()?;
+
+    let server_config = ServerConfig {
+        hostname: hostname.to_string(),
+        admin_api_url: admin_api_url.to_string(),
+        issuer_url: Some(issuer_url.to_string()),
+        client_id: Some(effective_client_id),
+        client_secret: auto_client_secret,
+        access_token: Some(token_response.access_token),
+        refresh_token: token_response.refresh_token,
+        expires_at,
+    };
+
+    // Replace existing or add new
+    if let Some(existing) = ctx.find_server_mut(hostname) {
+        *existing = server_config;
+    } else {
+        ctx.servers.push(server_config);
+    }
+
+    ctx.context.current_server = Some(hostname.to_string());
+    context::save_context(&ctx)?;
+
+    println!("Login successful!");
+    Ok(())
+}
+
+/// Refresh the access token if it's expired or about to expire (for the current server).
 pub async fn refresh_token_if_needed() -> Result<()> {
     let ctx = context::load_context()?;
+    let server = ctx.current_server()?;
 
     // Check if we have a token at all
-    if ctx.auth.access_token.is_none() {
+    if server.access_token.is_none() {
         return Err(miette!(
-            help = "Log in first with: oxiadm login --issuer-url <URL>",
-            "No access token found — you are not logged in"
+            help = "Log in first with: oxiadm login",
+            "No access token found for server '{}' — you are not logged in",
+            server.hostname
         ));
     }
 
     // Check if token is expired
-    let needs_refresh = if let Some(ref expires_at) = ctx.auth.expires_at {
+    let needs_refresh = if let Some(ref expires_at) = server.expires_at {
         match chrono::DateTime::parse_from_rfc3339(expires_at) {
             Ok(expiry) => {
                 // Refresh if token expires within 60 seconds
@@ -293,28 +363,28 @@ pub async fn refresh_token_if_needed() -> Result<()> {
     }
 
     // Need to refresh
-    let refresh_token = ctx.auth.refresh_token.as_ref().ok_or_else(|| {
+    let refresh_token = server.refresh_token.as_ref().ok_or_else(|| {
         miette!(
-            help = "Log in again with: oxiadm login --issuer-url <URL>",
+            help = "Log in again with: oxiadm login",
             "Token expired and no refresh token available"
         )
     })?;
 
-    let issuer_url = ctx.auth.issuer_url.as_ref().ok_or_else(|| {
+    let issuer_url = server.issuer_url.as_ref().ok_or_else(|| {
         miette!(
-            help = "Log in again with: oxiadm login --issuer-url <URL>",
+            help = "Log in again with: oxiadm login",
             "No issuer URL stored — cannot refresh token"
         )
     })?;
 
-    let client_id = ctx.auth.client_id.as_ref().ok_or_else(|| {
+    let client_id = server.client_id.as_ref().ok_or_else(|| {
         miette!(
-            help = "Log in again with: oxiadm login --issuer-url <URL>",
+            help = "Log in again with: oxiadm login",
             "No client ID stored — cannot refresh token"
         )
     })?;
 
-    let client_secret = ctx.auth.client_secret.as_deref();
+    let client_secret = server.client_secret.as_deref();
 
     let http_client = reqwest::Client::new();
     let metadata = discover_metadata(&http_client, issuer_url).await?;
@@ -335,7 +405,7 @@ pub async fn refresh_token_if_needed() -> Result<()> {
     if !response.status().is_success() {
         let body = response.text().await.unwrap_or_default();
         return Err(miette!(
-            help = "Log in again with: oxiadm login --issuer-url <URL>",
+            help = "Log in again with: oxiadm login",
             "Token refresh failed: {}",
             body
         ));
@@ -353,22 +423,29 @@ pub async fn refresh_token_if_needed() -> Result<()> {
     });
 
     let mut ctx = context::load_context()?;
-    ctx.auth.access_token = Some(token_response.access_token);
+    let server = ctx.current_server_mut()?;
+    server.access_token = Some(token_response.access_token);
     if let Some(new_refresh) = token_response.refresh_token {
-        ctx.auth.refresh_token = Some(new_refresh);
+        server.refresh_token = Some(new_refresh);
     }
-    ctx.auth.expires_at = expires_at;
+    server.expires_at = expires_at;
     context::save_context(&ctx)?;
 
     tracing::debug!("Token refreshed successfully");
     Ok(())
 }
 
-/// Clear auth tokens from context
+/// Clear auth tokens for the current server.
 pub fn logout() -> Result<()> {
     let mut ctx = context::load_context()?;
-    ctx.auth = AuthContext::default();
+    let server = ctx.current_server_mut()?;
+    server.access_token = None;
+    server.refresh_token = None;
+    server.expires_at = None;
+    server.client_id = None;
+    server.client_secret = None;
+    let hostname = server.hostname.clone();
     context::save_context(&ctx)?;
-    println!("Logged out successfully");
+    println!("Logged out from server '{}'", hostname);
     Ok(())
 }
