@@ -301,7 +301,7 @@ impl PublisherDaemon {
 
                         let key_id = format!("{}#main-key", actor_id);
                         let sig_config = SignatureConfig {
-                            algorithm: SignatureAlgorithm::Ed25519,
+                            algorithm: SignatureAlgorithm::RsaSha256,
                             parameters: SignatureParameters::new(),
                             key_id,
                             components: vec![

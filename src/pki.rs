@@ -194,10 +194,33 @@ impl KeyPair {
     }
 
     /// Generate an RSA key pair
-    fn generate_rsa(_key_size: u32) -> Result<Self, PkiError> {
-        Err(PkiError::UnsupportedAlgorithm(
-            "RSA key generation is not supported. Use Ed25519 instead.".to_string(),
-        ))
+    fn generate_rsa(key_size: u32) -> Result<Self, PkiError> {
+        use pkcs8::EncodePrivateKey;
+
+        let mut rng = rand::rngs::OsRng;
+        let bits = key_size as usize;
+        let private_key = rsa::RsaPrivateKey::new(&mut rng, bits).map_err(|e| {
+            PkiError::KeyGenerationError(format!("RSA key generation failed: {}", e))
+        })?;
+
+        let private_pem = private_key
+            .to_pkcs8_pem(pkcs8::LineEnding::LF)
+            .map_err(|e| {
+                PkiError::KeyGenerationError(format!("Failed to encode RSA private key: {}", e))
+            })?
+            .to_string();
+
+        let public_key = private_key.to_public_key();
+
+        // Mastodon and ActivityPub expect SPKI "PUBLIC KEY" format, not PKCS#1 "RSA PUBLIC KEY"
+        use rsa::pkcs8::EncodePublicKey;
+        let public_pem_spki = public_key
+            .to_public_key_pem(pkcs8::LineEnding::LF)
+            .map_err(|e| {
+                PkiError::KeyGenerationError(format!("Failed to encode RSA SPKI key: {}", e))
+            })?;
+
+        Self::from_pem(KeyAlgorithm::Rsa { key_size }, public_pem_spki, private_pem)
     }
 
     /// Generate an Ed25519 key pair using the ring crate
@@ -678,9 +701,15 @@ mod tests {
     }
 
     #[test]
-    fn test_rsa_generate_unsupported() {
+    fn test_rsa_generate() {
         let result = KeyPair::generate(KeyAlgorithm::Rsa { key_size: 2048 });
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        let key_pair = result.unwrap();
+        assert!(key_pair.public_key.pem_data.contains("BEGIN PUBLIC KEY"));
+        assert!(matches!(
+            key_pair.public_key.algorithm,
+            KeyAlgorithm::Rsa { key_size: 2048 }
+        ));
     }
 
     #[test]
