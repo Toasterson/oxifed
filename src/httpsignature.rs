@@ -648,39 +648,31 @@ impl HttpSignature {
                     signing_lines.push(format!("(request-target): {} {}", method, path_and_query));
                 }
                 ComponentIdentifier::Header(name) => {
-                    headers_list.push(name.to_lowercase());
                     let header = HeaderName::from_str(name)
                         .map_err(|_| SignatureError::InvalidHeader(name.clone()))?;
-                    let value = req
-                        .headers()
-                        .get(&header)
-                        .ok_or_else(|| {
-                            SignatureError::InvalidHeader(format!("Header not found: {}", name))
-                        })?
-                        .to_str()
-                        .map_err(|_| {
+                    if let Some(value) = req.headers().get(&header) {
+                        headers_list.push(name.to_lowercase());
+                        let value_str = value.to_str().map_err(|_| {
                             SignatureError::InvalidHeader(format!(
                                 "Non-ASCII value in header: {}",
                                 name
                             ))
                         })?;
-                    signing_lines.push(format!("{}: {}", name.to_lowercase(), value));
+                        signing_lines.push(format!("{}: {}", name.to_lowercase(), value_str));
+                    }
+                    // Skip headers not present on the request (e.g. content-type on GET)
                 }
                 ComponentIdentifier::Digest => {
-                    headers_list.push("digest".to_string());
-                    let digest = req
-                        .headers()
-                        .get("digest")
-                        .ok_or_else(|| {
-                            SignatureError::InvalidHeader("Digest header not found".to_string())
-                        })?
-                        .to_str()
-                        .map_err(|_| {
+                    if let Some(digest) = req.headers().get("digest") {
+                        headers_list.push("digest".to_string());
+                        let digest_str = digest.to_str().map_err(|_| {
                             SignatureError::InvalidHeader(
                                 "Non-ASCII value in Digest header".to_string(),
                             )
                         })?;
-                    signing_lines.push(format!("digest: {}", digest));
+                        signing_lines.push(format!("digest: {}", digest_str));
+                    }
+                    // Skip digest on requests without a body (e.g. GET)
                 }
                 _ => {
                     // Skip RFC 9421-only components like @method, @target-uri

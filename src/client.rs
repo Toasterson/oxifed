@@ -114,16 +114,37 @@ impl ActivityPubClient {
 
     /// Fetch an ActivityPub object from a URL
     pub async fn fetch_object(&self, url: &Url) -> Result<ActivityPubEntity> {
+        tracing::debug!("Fetching ActivityPub object from: {}", url);
+
         let mut request = self
             .client
             .get(url.clone())
             .headers(self.default_headers()?)
             .build()?;
 
+        // Add host and date headers for HTTP signature on GET requests
+        if let Some(host) = url.host_str() {
+            let host_value = if let Some(port) = url.port() {
+                format!("{}:{}", host, port)
+            } else {
+                host.to_string()
+            };
+            request.headers_mut().insert(
+                reqwest::header::HOST,
+                HeaderValue::from_str(&host_value).map_err(ClientError::InvalidHeader)?,
+            );
+        }
+        let date = chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S GMT");
+        request.headers_mut().insert(
+            reqwest::header::DATE,
+            HeaderValue::from_str(&date.to_string()).map_err(ClientError::InvalidHeader)?,
+        );
+
         // Sign the request if configured
         self.sign_request(&mut request)?;
 
         let response = self.client.execute(request).await?;
+        tracing::debug!("Fetch response status: {}", response.status());
         self.handle_response(response).await
     }
 
@@ -203,6 +224,8 @@ impl ActivityPubClient {
     }
 
     async fn try_send_to_inbox(&self, inbox_url: &Url, activity: &Activity) -> Result<()> {
+        tracing::debug!("Sending activity to inbox: {}", inbox_url);
+
         // Serialize the body first so we can compute the digest
         let body_bytes = serde_json::to_vec(activity)?;
 
@@ -213,6 +236,19 @@ impl ActivityPubClient {
             .header(CONTENT_TYPE, ACTIVITYPUB_CONTENT_TYPE)
             .body(body_bytes.clone())
             .build()?;
+
+        // Add Host header explicitly (reqwest sets it internally but not in the headers map)
+        if let Some(host) = inbox_url.host_str() {
+            let host_value = if let Some(port) = inbox_url.port() {
+                format!("{}:{}", host, port)
+            } else {
+                host.to_string()
+            };
+            request.headers_mut().insert(
+                reqwest::header::HOST,
+                HeaderValue::from_str(&host_value).map_err(ClientError::InvalidHeader)?,
+            );
+        }
 
         // Add Date and Digest headers required for HTTP Signature verification
         let date = chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S GMT");
@@ -236,9 +272,21 @@ impl ActivityPubClient {
         let response = self.client.execute(request).await?;
 
         if response.status().is_success() {
+            tracing::debug!("Activity delivered successfully to {}", inbox_url);
             Ok(())
         } else {
-            Err(ClientError::StatusError(response.status()))
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<failed to read body>".to_string());
+            tracing::error!(
+                "Delivery to {} failed with status {}: {}",
+                inbox_url,
+                status,
+                body
+            );
+            Err(ClientError::StatusError(status))
         }
     }
 

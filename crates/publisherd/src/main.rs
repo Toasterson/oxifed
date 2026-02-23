@@ -315,12 +315,15 @@ impl PublisherDaemon {
                         };
 
                         let client_config = ClientConfig {
-                            user_agent: "Oxifed/0.3.8".to_string(),
+                            user_agent: format!("Oxifed/{}", env!("CARGO_PKG_VERSION")),
                             http_signature_config: Some(sig_config),
                             oauth_token: None,
                         };
 
-                        info!("Created signing client for actor: {}", actor_id);
+                        info!(
+                            "Created signing client for actor: {} (key_id: {}, algorithm: {})",
+                            actor_id, key_doc.key_id, key_doc.algorithm
+                        );
                         return ActivityPubClient::with_config(client_config)
                             .map_err(PublisherError::ClientError);
                     }
