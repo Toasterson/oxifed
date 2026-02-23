@@ -116,16 +116,73 @@ impl PublisherDaemon {
             self.config.worker_count
         );
 
-        // Create channels for workers
+        // Set up exchange and shared queue once on a setup channel
+        let setup_channel = self.connection.create_channel().await?;
+
+        setup_channel
+            .exchange_declare(
+                EXCHANGE_ACTIVITYPUB_PUBLISH,
+                ExchangeKind::Fanout,
+                ExchangeDeclareOptions {
+                    durable: true,
+                    ..Default::default()
+                },
+                FieldTable::default(),
+            )
+            .await?;
+
+        // Single shared queue — all workers compete to consume from it
+        let queue_name = "publisherd.delivery";
+        setup_channel
+            .queue_declare(
+                queue_name,
+                QueueDeclareOptions {
+                    durable: true,
+                    auto_delete: false,
+                    exclusive: false,
+                    ..Default::default()
+                },
+                FieldTable::default(),
+            )
+            .await?;
+
+        setup_channel
+            .queue_bind(
+                queue_name,
+                EXCHANGE_ACTIVITYPUB_PUBLISH,
+                "",
+                QueueBindOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+
+        info!("Shared queue '{}' bound to exchange", queue_name);
+
+        // Delete old per-worker queues from previous versions
+        for i in 0..16 {
+            let old_queue = format!("publisherd.worker.{}", i);
+            if let Err(e) = setup_channel
+                .queue_delete(&old_queue, QueueDeleteOptions::default())
+                .await
+            {
+                // Ignore errors — queue may not exist
+                tracing::trace!("Could not delete old queue {}: {}", old_queue, e);
+            }
+        }
+
+        // Create worker tasks, each with its own channel consuming from the shared queue
         let mut workers = Vec::new();
 
         for worker_id in 0..self.config.worker_count {
             let channel = self.connection.create_channel().await?;
             let config = self.config.clone();
             let db_manager = self.db_manager.clone();
+            let queue = queue_name.to_string();
 
             let worker = tokio::spawn(async move {
-                if let Err(e) = Self::run_worker(worker_id, channel, db_manager, config).await {
+                if let Err(e) =
+                    Self::run_worker(worker_id, channel, db_manager, config, &queue).await
+                {
                     error!("Worker {} failed: {}", worker_id, e);
                 }
             });
@@ -154,52 +211,17 @@ impl PublisherDaemon {
         channel: Channel,
         db_manager: Option<Arc<DatabaseManager>>,
         config: PublisherConfig,
+        queue_name: &str,
     ) -> Result<(), PublisherError> {
         info!("Starting worker {}", worker_id);
 
-        // Declare the exchange
-        channel
-            .exchange_declare(
-                EXCHANGE_ACTIVITYPUB_PUBLISH,
-                ExchangeKind::Fanout,
-                ExchangeDeclareOptions {
-                    durable: true,
-                    ..Default::default()
-                },
-                FieldTable::default(),
-            )
-            .await?;
+        // Set prefetch to 1 so workers process one message at a time
+        channel.basic_qos(1, BasicQosOptions::default()).await?;
 
-        // Declare a worker-specific queue
-        let queue_name = format!("publisherd.worker.{}", worker_id);
-        let queue = channel
-            .queue_declare(
-                &queue_name,
-                QueueDeclareOptions {
-                    durable: true,
-                    auto_delete: false,
-                    exclusive: false,
-                    ..Default::default()
-                },
-                FieldTable::default(),
-            )
-            .await?;
-
-        // Bind queue to exchange
-        channel
-            .queue_bind(
-                queue.name().as_str(),
-                EXCHANGE_ACTIVITYPUB_PUBLISH,
-                "",
-                QueueBindOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
-
-        // Create consumer
+        // Create consumer on the shared queue
         let consumer = channel
             .basic_consume(
-                queue.name().as_str(),
+                queue_name,
                 &format!("publisherd_worker_{}", worker_id),
                 BasicConsumeOptions {
                     no_ack: false,
