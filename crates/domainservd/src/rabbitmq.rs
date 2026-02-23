@@ -1843,7 +1843,7 @@ async fn create_person_object(
 
     // Generate a key for the actor
     let mut pki_manager = PkiManager::new();
-    let public_key_doc = match pki_manager
+    let (public_key_doc, key_document) = match pki_manager
         .generate_user_key(actor_id.clone(), KeyAlgorithm::Rsa { key_size: 2048 })
     {
         Ok(user_key) => {
@@ -1852,8 +1852,7 @@ async fn create_person_object(
                 actor_id, user_key.key_id
             );
 
-            // Convert to PublicKeyDocument
-            Some(oxifed::database::PublicKeyDocument {
+            let pub_doc = oxifed::database::PublicKeyDocument {
                 id: user_key.key_id.clone(),
                 owner: actor_id.clone(),
                 public_key_pem: user_key.public_key.pem_data.clone(),
@@ -1869,11 +1868,57 @@ async fn create_person_object(
                 },
                 fingerprint: user_key.public_key.fingerprint.clone(),
                 created_at: now,
-            })
+            };
+
+            let key_doc = oxifed::database::KeyDocument {
+                id: None,
+                key_id: user_key.key_id.clone(),
+                actor_id: user_key.actor_id.clone(),
+                key_type: oxifed::database::KeyType::User,
+                algorithm: format!("{:?}", user_key.public_key.algorithm).to_lowercase(),
+                key_size: match user_key.public_key.algorithm {
+                    KeyAlgorithm::Rsa { key_size } => Some(key_size),
+                    _ => None,
+                },
+                public_key_pem: user_key.public_key.pem_data.clone(),
+                private_key_pem: user_key
+                    .private_key
+                    .as_ref()
+                    .map(|pk| pk.encrypted_pem.clone()),
+                encryption_algorithm: user_key
+                    .private_key
+                    .as_ref()
+                    .map(|pk| pk.encryption_algorithm.clone()),
+                fingerprint: user_key.public_key.fingerprint.clone(),
+                trust_level: user_key.trust_level,
+                domain_signature: None,
+                master_signature: None,
+                usage: vec!["signing".to_string()],
+                status: oxifed::database::KeyStatus::Active,
+                created_at: user_key.created_at,
+                expires_at: user_key.expires_at,
+                rotation_policy: {
+                    let mut doc = mongodb::bson::Document::new();
+                    doc.insert("automatic", user_key.rotation_policy.automatic);
+                    if let Some(interval) = user_key.rotation_policy.rotation_interval {
+                        doc.insert("rotation_interval", interval.num_seconds());
+                    }
+                    if let Some(max_age) = user_key.rotation_policy.max_age {
+                        doc.insert("max_age", max_age.num_seconds());
+                    }
+                    if let Some(notify_before) = user_key.rotation_policy.notify_before {
+                        doc.insert("notify_before", notify_before.num_seconds());
+                    }
+                    Some(doc)
+                },
+                domain: None,
+            };
+
+            (Some(pub_doc), Some(key_doc))
         }
         Err(e) => {
             error!("Failed to generate key for actor {}: {}", actor_id, e);
-            None
+            (None, None)
         }
     };
 
@@ -1914,6 +1959,18 @@ async fn create_person_object(
         error!("Failed to insert actor: {}", e);
         RabbitMQError::DbError(crate::db::DbError::DatabaseError(e))
     })?;
+
+    // Save the key document to the keys collection (needed for HTTP signature signing)
+    if let Some(key_doc) = key_document {
+        match db.manager().insert_key(key_doc).await {
+            Ok(key_id) => {
+                info!("Key saved to database with ID: {}", key_id);
+            }
+            Err(e) => {
+                error!("Failed to save key to database: {}", e);
+            }
+        }
+    }
 
     create_webfinger_profile(db, &message.subject, &actor_id, Some(aliases), None).await
 }
@@ -2495,7 +2552,7 @@ async fn create_user(db: &Arc<MongoDB>, message: &UserCreateMessage) -> Result<(
 
     // Generate a key for the user
     let mut pki_manager = PkiManager::new();
-    let public_key_doc = match pki_manager
+    let (public_key_doc, key_document) = match pki_manager
         .generate_user_key(actor_id.clone(), KeyAlgorithm::Rsa { key_size: 2048 })
     {
         Ok(user_key) => {
@@ -2504,8 +2561,7 @@ async fn create_user(db: &Arc<MongoDB>, message: &UserCreateMessage) -> Result<(
                 actor_id, user_key.key_id
             );
 
-            // Convert to PublicKeyDocument
-            Some(oxifed::database::PublicKeyDocument {
+            let pub_doc = oxifed::database::PublicKeyDocument {
                 id: user_key.key_id.clone(),
                 owner: actor_id.clone(),
                 public_key_pem: user_key.public_key.pem_data.clone(),
@@ -2521,11 +2577,57 @@ async fn create_user(db: &Arc<MongoDB>, message: &UserCreateMessage) -> Result<(
                 },
                 fingerprint: user_key.public_key.fingerprint.clone(),
                 created_at: now,
-            })
+            };
+
+            let key_doc = oxifed::database::KeyDocument {
+                id: None,
+                key_id: user_key.key_id.clone(),
+                actor_id: user_key.actor_id.clone(),
+                key_type: oxifed::database::KeyType::User,
+                algorithm: format!("{:?}", user_key.public_key.algorithm).to_lowercase(),
+                key_size: match user_key.public_key.algorithm {
+                    KeyAlgorithm::Rsa { key_size } => Some(key_size),
+                    _ => None,
+                },
+                public_key_pem: user_key.public_key.pem_data.clone(),
+                private_key_pem: user_key
+                    .private_key
+                    .as_ref()
+                    .map(|pk| pk.encrypted_pem.clone()),
+                encryption_algorithm: user_key
+                    .private_key
+                    .as_ref()
+                    .map(|pk| pk.encryption_algorithm.clone()),
+                fingerprint: user_key.public_key.fingerprint.clone(),
+                trust_level: user_key.trust_level,
+                domain_signature: None,
+                master_signature: None,
+                usage: vec!["signing".to_string()],
+                status: oxifed::database::KeyStatus::Active,
+                created_at: user_key.created_at,
+                expires_at: user_key.expires_at,
+                rotation_policy: {
+                    let mut doc = mongodb::bson::Document::new();
+                    doc.insert("automatic", user_key.rotation_policy.automatic);
+                    if let Some(interval) = user_key.rotation_policy.rotation_interval {
+                        doc.insert("rotation_interval", interval.num_seconds());
+                    }
+                    if let Some(max_age) = user_key.rotation_policy.max_age {
+                        doc.insert("max_age", max_age.num_seconds());
+                    }
+                    if let Some(notify_before) = user_key.rotation_policy.notify_before {
+                        doc.insert("notify_before", notify_before.num_seconds());
+                    }
+                    Some(doc)
+                },
+                domain: None,
+            };
+
+            (Some(pub_doc), Some(key_doc))
         }
         Err(e) => {
             error!("Failed to generate key for user {}: {}", actor_id, e);
-            None
+            (None, None)
         }
     };
 
@@ -2570,6 +2672,18 @@ async fn create_user(db: &Arc<MongoDB>, message: &UserCreateMessage) -> Result<(
         error!("Failed to insert user '{}': {}", username, e);
         RabbitMQError::DatabaseError(e)
     })?;
+
+    // Save the key document to the keys collection (needed for HTTP signature signing)
+    if let Some(key_doc) = key_document {
+        match db.manager().insert_key(key_doc).await {
+            Ok(key_id) => {
+                info!("Key saved to database with ID: {}", key_id);
+            }
+            Err(e) => {
+                error!("Failed to save key to database: {}", e);
+            }
+        }
+    }
 
     // Create webfinger profile
     let subject = format!("{}@{}", username, domain);
