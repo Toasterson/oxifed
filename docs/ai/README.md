@@ -9,6 +9,7 @@ Each plan captures research findings, architectural decisions, and phased implem
 | [002-delivery-feedback.md](002-delivery-feedback.md) | Planning | publisherd delivery reports and error feedback system |
 | [003-timelines.md](003-timelines.md) | Planning | Home/local/federated timelines and collection pagination |
 | [004-pkgfed.md](004-pkgfed.md) | Planning | Subscription-based package update notifications via ActivityPub |
+| [005-bot-marking.md](005-bot-marking.md) | Planning | Bot account marking, filtering, and Akh-medu integration |
 
 ## Conventions
 

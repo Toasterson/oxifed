@@ -2,7 +2,7 @@
 
 **Status:** Planning
 **Created:** 2026-02-23
-**Last Updated:** 2026-02-23
+**Last Updated:** 2026-02-24
 
 ## Summary
 
@@ -123,6 +123,67 @@ New exchanges to declare (by the stage daemons themselves):
 | `oxifed.pipeline.spam_checked` | Fanout | spamfilterd |
 | `oxifed.pipeline.moderated` | Fanout | moderationd |
 | `oxifed.pipeline.verified` | Fanout | relationshipd |
+
+### Exchange and Queue Type Rationale
+
+**Between stages: Fanout exchanges**
+
+All intermediate exchanges are **fanout** because:
+- The primary consumer is the next stage's queue (1:1 relationship)
+- Fanout allows **tapping**: bind a monitoring/metrics/audit queue to any
+  intermediate exchange without disrupting the pipeline flow
+- If a stage's output needs to fan out to multiple consumers in the future
+  (e.g., moderation output goes to both relationship_verify AND an analytics
+  queue), fanout supports that naturally
+- No routing key logic needed — every message passes through every stage
+
+**Within a stage: Competing consumers on a single shared queue**
+
+Each stage has ONE queue consumed by N replicas of the stage daemon:
+- All replicas compete for messages with `basic_qos(1)` prefetch
+- Messages are distributed round-robin among replicas
+- Scale horizontally by adding K8s replicas (HPA on queue depth)
+- Same pattern as publisherd's `publisherd.delivery` queue
+
+```
+                     FANOUT                          FANOUT
+EXCHANGE_INCOMING_PROCESS ──> [validation queue] ──> oxifed.pipeline.validated ──> [spam_filter queue]
+                                 │  │  │                                             │  │  │
+                              replica 1                                           replica 1
+                              replica 2                                           replica 2
+                              replica N                                           replica N
+                           (competing consumers,                              (competing consumers,
+                            basic_qos(1))                                      basic_qos(1))
+```
+
+**DLX: Direct exchange**
+
+`oxifed.dlx` is a **direct** exchange. Rejected messages carry the stage name
+as routing key, enabling per-stage dead letter queues in the future:
+- Routing key `"spam_filter"` -> `oxifed.dlq.spam_filter`
+- Routing key `"moderation"` -> `oxifed.dlq.moderation`
+- Default binding with key `""` to `oxifed.dlq` catches everything for now
+
+**Stage skipping**
+
+When a stage daemon is not deployed, its input queue accumulates messages
+until TTL (30 min). To skip a stage, the next stage's daemon can bind its
+input queue directly to the previous stage's output exchange instead of the
+skipped stage's output exchange. This is a deployment-time configuration
+choice — no code changes needed.
+
+Example: skip spam_filter stage:
+```
+oxifed.pipeline.validated (exchange)
+    |
+    +---> oxifed.incoming.spam_filter (queue, unbound, no consumer)
+    |
+    +---> oxifed.incoming.moderation (queue, bound directly here instead)
+              consumed by: moderationd
+```
+
+Each stage daemon takes its input exchange name as a configuration parameter
+(`INPUT_EXCHANGE` env var), defaulting to the expected previous stage's output.
 
 ### Pipeline Message Envelope
 
